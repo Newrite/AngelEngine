@@ -150,13 +150,15 @@ namespace AngelEngine
         std::println("[Script]: {}", msg);
     }
 
-    enum class BindingError : std::uint8_t
+    export enum class BindingError : std::uint8_t
     {
         BindingGlobalsFailed,
     };
 
     export struct BindingManager final
     {
+        using ErrorType = BindingError;
+
         static void RegisterStandardAddons(asIScriptEngine* engine)
         {
             RegisterStdString(engine);

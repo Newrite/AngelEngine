@@ -25,6 +25,7 @@ import AngelEngine.PredefinedGenerator;
 import AngelEngine.ModuleLoader;
 import AngelEngine.ExecutionManager;
 import AngelEngine.StateSerializer;
+import AngelEngine.Interfaces;
 
 namespace fs = std::filesystem;
 
@@ -65,7 +66,8 @@ namespace AngelEngine
         }
     };
 
-    export struct ScriptEngine final
+    // --- ScriptEngine implementing IScriptEngine (CRTP) ---
+    export struct ScriptEngine final : public IScriptEngine<ScriptEngine>
     {
         using AsEnginePtr = std::unique_ptr<asIScriptEngine, AngelScriptDeleter>;
         using PtrType = std::unique_ptr<ScriptEngine>;
@@ -212,4 +214,10 @@ namespace AngelEngine
 
         AsEnginePtr engine_;
     };
+    
+    // Static check to ensure ScriptEngine satisfies the concepts (optional but good for documentation)
+    static_assert(IModuleLoader<ModuleLoader>);
+    static_assert(IExecutionManager<ExecutionManager>);
+    static_assert(IStateSerializer<StateSerializer>);
+    static_assert(IBindingManager<BindingManager>);
 }

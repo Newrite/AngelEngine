@@ -32,6 +32,7 @@ namespace AngelEngine
     export struct ModuleLoader
     {
         using PtrType = std::unique_ptr<ModuleLoader>;
+        using ErrorType = ModuleLoaderError;
 
         explicit ModuleLoader(ModuleLoaderConfig config) : config_(std::move(config))
         {
@@ -60,8 +61,10 @@ namespace AngelEngine
                 {
                     if (entry.is_regular_file() && entry.path().extension() == ".as")
                     {
-                        int r = builder_->AddSectionFromFile(entry.path().string().c_str());
-                        if (r < 0) std::println(stderr, "[ScriptEngine] Failed to add file: {}", entry.path().string());
+                        // Use absolute path to avoid issues with relative paths in AngelScript
+                        auto absPath = fs::absolute(entry.path());
+                        int r = builder_->AddSectionFromFile(absPath.string().c_str());
+                        if (r < 0) std::println(stderr, "[ScriptEngine] Failed to add file: {}", absPath.string());
                     }
                 }
             }

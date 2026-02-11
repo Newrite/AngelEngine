@@ -27,6 +27,10 @@ int main() {
     {
         std::println("Fail run");
     }
+    if (!engine->HotReload())
+    {
+        std::println("Fail hot reload");
+    }
     
     engine->Tick(0.2);
     engine->Tick(0.2);

@@ -76,7 +76,11 @@ namespace AngelEngine
 
             for (const auto& modName : moduleLoader->GetLoadedModules())
             {
-                StartModContext(engine, modName);
+                auto resultStartModContext = StartModContext(engine, modName);
+                if (!resultStartModContext.has_value())
+                {
+                    std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
+                }
             }
 
             return {};
