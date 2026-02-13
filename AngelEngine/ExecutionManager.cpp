@@ -1,20 +1,19 @@
 module;
 
-#include <serializer.h>
 #include <filesystem>
 #include <mutex>
-#include <memory>
 #include <print>
-#include <expected>
-#include <chrono>
 
 #include <angelscript.h>
 #include <contextmgr.h>
-#include <functional>
+
+#include <EASTL/unique_ptr.h>
+#include <EASTL/expected.h>
+#include <EASTL/chrono.h>
 
 export module AngelEngine.ExecutionManager;
 
-import AngelEngine.ModuleLoader;
+import AngelEngine.Interfaces;
 
 namespace fs = std::filesystem;
 
@@ -23,16 +22,11 @@ namespace AngelEngine
     // ID for UserData to store the pointer to CContextMgr (constant from contextmgr.cpp)
     static const asPWORD CONTEXT_MGR_USER_DATA = 1002;
 
-    export enum class ExecutionError : std::uint8_t
+    export class ExecutionManager final : public IExecutionManager
     {
-        NoModsLoadedToRun,
-        FailCreateContext
-    };
-
-    export struct ExecutionManager
-    {
-        using PtrType = std::unique_ptr<ExecutionManager>;
-        using ContextManagerPtr = std::unique_ptr<CContextMgr>;
+    public:
+        using PtrType = eastl::unique_ptr<ExecutionManager>;
+        using ContextManagerPtr = eastl::unique_ptr<CContextMgr>;
 
         // Script execution time limit per frame (protection against while true)
         static constexpr long long MAX_SCRIPT_EXEC_TIME_MS = 1000;
@@ -42,7 +36,7 @@ namespace AngelEngine
             Init();
         }
 
-        void AbortAll() const
+        void AbortAll() const override
         {
             if (contextMgr_)
             {
@@ -50,33 +44,33 @@ namespace AngelEngine
             }
         }
 
-        void Renew()
+        void Renew() override
         {
             Init();
         }
 
-        void Tick(const float deltaTime)
+        void Tick(const float deltaTime) override
         {
             // Update frame start time for Watchdog
-            frameStartTime_ = std::chrono::steady_clock::now();
+            frameStartTime_ = eastl::chrono::steady_clock::now();
             
             contextMgr_->ExecuteScripts();
         }
 
-        std::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
-                                                       const ModuleLoader::PtrType& moduleLoader)
+        eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
+                                                       const IModuleLoader* moduleLoader) override
         {
             std::scoped_lock lock(mutex_);
 
             if (moduleLoader->Empty())
             {
                 std::println("[ScriptEngine] No mods loaded to run.");
-                return std::unexpected(ExecutionError::NoModsLoadedToRun);
+                return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
             }
 
             for (const auto& modName : moduleLoader->GetLoadedModules())
             {
-                auto resultStartModContext = StartModContext(engine, modName);
+                auto resultStartModContext = StartModContext(engine, modName.c_str());
                 if (!resultStartModContext.has_value())
                 {
                     std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
@@ -86,7 +80,7 @@ namespace AngelEngine
             return {};
         }
 
-        void RegisterThreadSupport(asIScriptEngine* engine)
+        void RegisterThreadSupport(asIScriptEngine* engine) override
         {
              // Register our Wait(float seconds) function
             int r = engine->RegisterGlobalFunction("void Wait(float)", asFUNCTION(Game_Wait_Callback), asCALL_CDECL);
@@ -131,8 +125,8 @@ namespace AngelEngine
             ExecutionManager* self = static_cast<ExecutionManager*>(param);
 
             // Check how much time has passed since the start of the frame (Tick)
-            auto now = std::chrono::steady_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - self->frameStartTime_).count();
+            auto now = eastl::chrono::steady_clock::now();
+            auto duration = eastl::chrono::duration_cast<eastl::chrono::milliseconds>(now - self->frameStartTime_).count();
 
             if (duration > MAX_SCRIPT_EXEC_TIME_MS)
             {
@@ -142,7 +136,7 @@ namespace AngelEngine
             }
         }
 
-        std::expected<void, ExecutionError> StartModContext(asIScriptEngine* engine,
+        eastl::expected<void, ExecutionError> StartModContext(asIScriptEngine* engine,
                                                             const std::string& modName)
         {
             asIScriptModule* mod = engine->GetModule(modName.c_str());
@@ -163,12 +157,12 @@ namespace AngelEngine
                 return {};
             }
             std::println(stderr, "[ScriptEngine] Failed to create context for {}", modName);
-            return std::unexpected(ExecutionError::FailCreateContext);
+            return eastl::unexpected(ExecutionError::FailCreateContext);
         }
 
         void Init()
         {
-            contextMgr_ = std::make_unique<CContextMgr>();
+            contextMgr_ = eastl::make_unique<CContextMgr>();
             contextMgr_->SetGetTimeCallback(GetSystemTimeMs);
         }
 
@@ -176,6 +170,6 @@ namespace AngelEngine
         std::mutex mutex_{};
         
         // Frame start time (for Watchdog)
-        std::chrono::time_point<std::chrono::steady_clock> frameStartTime_;
+        eastl::chrono::steady_clock::time_point frameStartTime_;
     };
 }
