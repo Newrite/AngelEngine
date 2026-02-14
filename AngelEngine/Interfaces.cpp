@@ -8,6 +8,7 @@ module;
 #include <EASTL/vector.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/expected.h>
+#include <EASTL/functional.h>
 
 export module AngelEngine.Interfaces;
 
@@ -92,10 +93,38 @@ namespace AngelEngine
         virtual bool Empty() const = 0;
     };
 
+    // Функция, которую передает пользователь (код Скайрима), 
+    // чтобы заполнить аргументы контекста перед его запуском.
+    export using ArgInjector = eastl::function<void(asIScriptContext*)>;
+
+    export struct IEventManager
+    {
+        virtual ~IEventManager() = default;
+
+        // Подписка из скрипта
+        virtual void Subscribe(const eastl::string& eventName, asIScriptFunction* callback) = 0;
+        
+        // Очистка при перезагрузке (HotReload)
+        virtual void ClearAll() = 0;
+
+        // 1. Прямой вызов (мгновенно, блокирует поток, можно менять inout аргументы)
+        virtual void DispatchDirect(asIScriptEngine* engine, const eastl::string& eventName, const ArgInjector& argInjector = nullptr) = 0;
+
+        // 2. Отложенный вызов (добавляет в очередь на следующий Tick)
+        virtual void DispatchDeferred(const eastl::string& eventName, const ArgInjector& argInjector = nullptr) = 0;
+        
+        // Метод для ExecutionManager, чтобы забрать очередь отложенных событий
+        struct QueuedEvent {
+            asIScriptFunction* func;
+            ArgInjector argInjector;
+        };
+        virtual eastl::vector<QueuedEvent> PopDeferredEvents() = 0;
+    };
+
     export struct IExecutionManager
     {
         virtual ~IExecutionManager() = default;
-        virtual void Tick(float deltaTime) = 0;
+        virtual void Tick(float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) = 0;
         virtual void AbortAll() const = 0;
         virtual void Renew() = 0;
         virtual void RegisterThreadSupport(asIScriptEngine* engine) = 0;
@@ -105,7 +134,7 @@ namespace AngelEngine
     export struct IStateSerializer
     {
         virtual ~IStateSerializer() = default;
-        virtual eastl::expected<void, ModuleLoaderError> HotReload(asIScriptEngine* engine, const eastl::unique_ptr<IModuleLoader>& moduleLoader, const eastl::unique_ptr<IExecutionManager>& executionManager) = 0;
+        virtual eastl::expected<void, ModuleLoaderError> HotReload(asIScriptEngine* engine, const eastl::unique_ptr<IModuleLoader>& moduleLoader, const eastl::unique_ptr<IExecutionManager>& executionManager, const eastl::unique_ptr<IEventManager>& eventManager) = 0;
     };
 
     export struct IBindingManager
@@ -125,6 +154,7 @@ namespace AngelEngine
         virtual eastl::unique_ptr<IExecutionManager> CreateExecutionManager() = 0;
         virtual eastl::unique_ptr<IStateSerializer> CreateStateSerializer() = 0;
         virtual eastl::unique_ptr<IBindingManager> CreateBindingManager() = 0;
+        virtual eastl::unique_ptr<IEventManager> CreateEventManager() = 0;
     };
     
     // Observer: Listener for engine events
@@ -150,6 +180,7 @@ namespace AngelEngine
         virtual void AddBinding(IScriptBinding* binding) const = 0;
         virtual void CallGarbageCollectorFullCycle() = 0;
         virtual void CallGarbageColletorOneStep() = 0;
+        virtual IEventManager* GetEventManager() const = 0;
 
         // Observer management
         virtual void AddListener(IEngineListener* listener) = 0;

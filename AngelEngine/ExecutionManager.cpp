@@ -19,8 +19,6 @@ namespace fs = std::filesystem;
 
 namespace AngelEngine
 {
-    // ID for UserData to store the pointer to CContextMgr (constant from contextmgr.cpp)
-    static const asPWORD CONTEXT_MGR_USER_DATA = 1002;
 
     export class ExecutionManager final : public IExecutionManager
     {
@@ -49,11 +47,32 @@ namespace AngelEngine
             Init();
         }
 
-        void Tick(const float deltaTime) override
+        void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) override
         {
             // Update frame start time for Watchdog
             frameStartTime_ = eastl::chrono::steady_clock::now();
             
+            // 1. Retrieve deferred events
+            if (eventManager)
+            {
+                auto queuedEvents = eventManager->PopDeferredEvents();
+                for (const auto& ev : queuedEvents)
+                {
+                    // Add them to ContextMgr (they will run asynchronously, supporting Wait)
+                    asIScriptContext* ctx = contextMgr_->AddContext(engine, ev.func);
+                    if (ctx)
+                    {
+                        if (ev.argInjector) ev.argInjector(ctx);
+                        
+                        // Set callbacks for safety and debugging
+                        ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+                        ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
+                    }
+                    // Release the Ref we took when queuing
+                    ev.func->Release();
+                }
+            }
+
             contextMgr_->ExecuteScripts();
         }
 
@@ -61,6 +80,9 @@ namespace AngelEngine
                                                        const IModuleLoader* moduleLoader) override
         {
             std::scoped_lock lock(mutex_);
+
+            // Ensure we don't have leftover contexts from previous runs
+            // contextMgr_->AbortAll(); // Optional: depends on if RunAllMods is additive or a reset
 
             if (moduleLoader->Empty())
             {
@@ -82,9 +104,10 @@ namespace AngelEngine
 
         void RegisterThreadSupport(asIScriptEngine* engine) override
         {
-             // Register our Wait(float seconds) function
-            int r = engine->RegisterGlobalFunction("void Wait(float)", asFUNCTION(Game_Wait_Callback), asCALL_CDECL);
-            if (r < 0) std::println(stderr, "Failed to register Wait function");
+            // Register AS void sleep(ms) function
+            contextMgr_->RegisterThreadSupport(engine);
+            // Register standard CoRoutine support (yield, createCoRoutine)
+            contextMgr_->RegisterCoRoutineSupport(engine);
         }
 
     private:
@@ -94,29 +117,6 @@ namespace AngelEngine
             auto now = steady_clock::now();
             auto ms = duration_cast<milliseconds>(now.time_since_epoch()).count();
             return static_cast<asUINT>(ms);
-        }
-
-        // --- Implementation of Wait function ---
-        static void Game_Wait_Callback(float seconds)
-        {
-            // Get current active context
-            asIScriptContext* ctx = asGetActiveContext();
-            if (!ctx) return;
-
-            // Get pointer to manager from UserData
-            CContextMgr* mgr = reinterpret_cast<CContextMgr*>(ctx->GetUserData(CONTEXT_MGR_USER_DATA));
-
-            if (mgr)
-            {
-                // Convert seconds to milliseconds
-                asUINT ms = static_cast<asUINT>(seconds * 1000.0f);
-
-                // Tell manager that this context should sleep
-                mgr->SetSleeping(ctx, ms);
-
-                // Suspend VM execution
-                ctx->Suspend();
-            }
         }
 
         // --- Watchdog (LineCallback) ---
@@ -136,6 +136,39 @@ namespace AngelEngine
             }
         }
 
+        // --- Exception Callback ---
+        static void ExceptionCallback(asIScriptContext* ctx, void* param)
+        {
+            std::println(stderr, "[Script Exception] {}", ctx->GetExceptionString());
+            
+            const asIScriptFunction* func = ctx->GetExceptionFunction();
+            if (func)
+            {
+                std::println(stderr, "  Function: {}", func->GetDeclaration());
+                std::println(stderr, "  Section:  {}", func->GetModuleName()); 
+            }
+            
+            std::println(stderr, "  Line:     {}", ctx->GetExceptionLineNumber());
+
+            // Print Call Stack
+            std::println(stderr, "--- Call Stack ---");
+            for (asUINT n = 0; n < ctx->GetCallstackSize(); n++)
+            {
+                asIScriptFunction* stackFunc = ctx->GetFunction(n);
+                if (stackFunc)
+                {
+                    int line, column;
+                    const char* section;
+                    line = ctx->GetLineNumber(n, &column, &section);
+                    std::println(stderr, "  {}: {} ({}, {})", 
+                        stackFunc->GetDeclaration(), 
+                        section ? section : "<unknown>", 
+                        line, column);
+                }
+            }
+            std::println(stderr, "------------------");
+        }
+
         eastl::expected<void, ExecutionError> StartModContext(asIScriptEngine* engine,
                                                             const std::string& modName)
         {
@@ -150,8 +183,9 @@ namespace AngelEngine
 
             if (ctx)
             {
-                // Set Watchdog
+                // Set Watchdog and Exception Handler
                 ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+                ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
 
                 std::println("[ScriptEngine] Mod started via ContextMgr: {}", modName);
                 return {};

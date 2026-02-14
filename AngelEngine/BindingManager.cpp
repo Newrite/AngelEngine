@@ -8,6 +8,7 @@ module;
 #include <asbind20/asbind.hpp>
 #include <angelscript.h>
 #include <print>
+#include <string>
 
 #include <scriptstdstring.h>
 #include <scriptarray.h>
@@ -25,22 +26,44 @@ import AngelEngine.Interfaces;
 
 namespace AngelEngine
 {
-    
-    export struct GlobalBindings final : IScriptBinding
+
+    export class EventBinding final : public IScriptBinding
     {
-        
-        // Function for script output (replaces cout)
-        static void scriptPrint(const std::string& msg)
-        {
-            std::println("[Script]: {}", msg);
-        }
-        
+    public:
+        explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager) {}
+
         void Bind(asIScriptEngine* engine) override
         {
-            asbind20::global(engine)
-                .function("void print(const string &in msg)", &scriptPrint);
+            // Регистрируем глобальную функцию подписки. 
+            // Она принимает строку (название эвента) и ЛЮБУЮ функцию (asIScriptFunction@).
+            
+            // Здесь asbind20 не очень подходит, потому что он работает со строгой типизацией C++.
+            // Поэтому используем сырой API для этой конкретной функции.
+            
+            engine->RegisterGlobalFunction(
+                "void Subscribe(const string &in eventName, asIScriptFunction@ callback)",
+                asFUNCTION(ProxySubscribe),
+                asCALL_CDECL
+            );
+            
+            // Сохраняем указатель глобально для прокси-функции (хак для CDECL)
+            // В идеале использовать asCALL_THISCALL_ASGLOBAL или передавать через UserData движка.
+            GlobalEventManager = eventManager_; 
         }
-    } globalBindings;
+
+    private:
+        static void ProxySubscribe(std::string* eventName, asIScriptFunction* callback)
+        {
+            if (GlobalEventManager && eventName && callback)
+            {
+                // Конвертируем std::string (от аддона scriptstdstring) в eastl::string
+                GlobalEventManager->Subscribe(eastl::string(eventName->c_str()), callback);
+            }
+        }
+        
+        static inline IEventManager* GlobalEventManager = nullptr;
+        IEventManager* eventManager_;
+    };
 
     export class BindingManager final : public IBindingManager
     {

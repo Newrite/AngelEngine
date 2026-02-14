@@ -54,10 +54,12 @@ namespace AngelEngine
         
         eastl::expected<void, ModuleLoaderError> HotReload(asIScriptEngine* engine,
                                                          const eastl::unique_ptr<IModuleLoader>& moduleLoader,
-                                                         const eastl::unique_ptr<IExecutionManager>& executionManager) override
+                                                         const eastl::unique_ptr<IExecutionManager>& executionManager, const eastl::unique_ptr<IEventManager>& eventManager) override
         {
             std::println("[ScriptEngine] Starting Hot Reload...");
 
+            eventManager->ClearAll();
+            
             executionManager->AbortAll();
 
             lastSnapshots = GetSnapshots(engine, moduleLoader.get());

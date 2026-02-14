@@ -17,6 +17,7 @@ import AngelEngine.ModuleLoader;
 import AngelEngine.ExecutionManager;
 import AngelEngine.StateSerializer;
 import AngelEngine.BindingManager;
+import AngelEngine.EventManager;
 
 namespace fs = std::filesystem;
 
@@ -155,6 +156,11 @@ namespace AngelEngine
         eastl::unique_ptr<IBindingManager> CreateBindingManager() override
         {
             return eastl::make_unique<BindingManager>();
+        }
+
+        eastl::unique_ptr<IEventManager> CreateEventManager() override
+        {
+            return eastl::make_unique<EventManager>();
         }
 
     private:

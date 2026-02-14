@@ -91,7 +91,7 @@ namespace AngelEngine
         void Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
-            executionManager_->Tick(deltaTime);
+            executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
         }
 
         eastl::expected<void, EngineError> RunAllMods() override
@@ -127,7 +127,8 @@ namespace AngelEngine
         eastl::expected<void, EngineError> HotReload() const override
         {
             BroadcastHotReloadStarted();
-            auto resultHotReload = stateSerializer_->HotReload(engine_.get(), moduleLoader_, executionManager_);
+            
+            auto resultHotReload = stateSerializer_->HotReload(engine_.get(), moduleLoader_, executionManager_, eventManager_);
             BroadcastHotReloadFinished();
 
             if (!resultHotReload.has_value())
@@ -144,6 +145,8 @@ namespace AngelEngine
             BroadcastAddBinding(binding);
         }
 
+        IEventManager* GetEventManager() const override { return eventManager_.get(); }
+
     private:
         explicit ScriptEngine(AsEnginePtr as_engine, 
                               eastl::unique_ptr<IEngineComponentFactory> factory,
@@ -159,6 +162,11 @@ namespace AngelEngine
             executionManager_ = factory->CreateExecutionManager();
             stateSerializer_ = factory->CreateStateSerializer();
             bindingManager_ = factory->CreateBindingManager();
+            eventManager_ = factory->CreateEventManager();
+
+            // Create and register EventBinding
+            eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
+            bindingManager_->AddBinding(eventBinding_.get());
 
             InitializeEngine();
         }
@@ -266,5 +274,9 @@ namespace AngelEngine
         eastl::unique_ptr<IExecutionManager> executionManager_;
         eastl::unique_ptr<IStateSerializer> stateSerializer_;
         eastl::unique_ptr<IBindingManager> bindingManager_;
+        eastl::unique_ptr<IEventManager> eventManager_;
+        
+        // Bindings
+        eastl::unique_ptr<IScriptBinding> eventBinding_;
     };
 }
