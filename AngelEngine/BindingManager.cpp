@@ -26,42 +26,65 @@ import AngelEngine.Interfaces;
 
 namespace AngelEngine
 {
+    
+    IEventManager* eventManager;
 
     export class EventBinding final : public IScriptBinding
     {
     public:
-        explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager) {}
+        explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager)
+        {
+            eventManager = eventManager_;
+        }
 
         void Bind(asIScriptEngine* engine) override
         {
             // Регистрируем глобальную функцию подписки. 
             // Она принимает строку (название эвента) и ЛЮБУЮ функцию (asIScriptFunction@).
             
-            // Здесь asbind20 не очень подходит, потому что он работает со строгой типизацией C++.
-            // Поэтому используем сырой API для этой конкретной функции.
+            // Используем asCALL_CDECL_OBJLAST, чтобы передать 'this' (EventBinding*) как последний параметр.
+            // Это позволяет избежать использования глобальной статической переменной.
             
-            engine->RegisterGlobalFunction(
-                "void Subscribe(const string &in eventName, asIScriptFunction@ callback)",
-                asFUNCTION(ProxySubscribe),
-                asCALL_CDECL
-            );
-            
-            // Сохраняем указатель глобально для прокси-функции (хак для CDECL)
-            // В идеале использовать asCALL_THISCALL_ASGLOBAL или передавать через UserData движка.
-            GlobalEventManager = eventManager_; 
+            int r = engine->RegisterGlobalFunction(
+                            "void Subscribe(const string &in eventName, ?&in callback)",
+                            asFUNCTION(ProxySubscribe),
+                            asCALL_CDECL
+                        );
+
+            if (r < 0)
+            {
+                std::println(stderr, "[EventBinding] Failed to register Subscribe function. Code: {}", r);
+            }
         }
 
     private:
-        static void ProxySubscribe(std::string* eventName, asIScriptFunction* callback)
+        // [FIX] Исправлена сигнатура C++ функции для соответствия asCALL_CDECL и типам AS
+        static void ProxySubscribe(const std::string& eventName, void* callbackRef, int typeId)
         {
-            if (GlobalEventManager && eventName && callback)
+            if (!eventManager) return;
+            if (!callbackRef) return;
+
+            // Получаем информацию о типе переданного аргумента
+            asIScriptContext* ctx = asGetActiveContext();
+            if (!ctx) return;
+            
+            asIScriptEngine* engine = ctx->GetEngine();
+            asITypeInfo* type = engine->GetTypeInfoById(typeId);
+
+            // Проверяем, что переданный объект является funcdef (делегатом функции)
+            if (type && (type->GetFlags() & asOBJ_FUNCDEF))
             {
-                // Конвертируем std::string (от аддона scriptstdstring) в eastl::string
-                GlobalEventManager->Subscribe(eastl::string(eventName->c_str()), callback);
+                // Безопасный каст, так как funcdef в AS представлен как asIScriptFunction*
+                asIScriptFunction* func = static_cast<asIScriptFunction*>(callbackRef);
+                
+                eventManager->Subscribe(eastl::string(eventName.c_str()), func);
+            }
+            else
+            {
+                std::println(stderr, "[ScriptEngine] Error: Subscribe called with invalid type for event '{}'. Expected a function handle.", eventName);
             }
         }
         
-        static inline IEventManager* GlobalEventManager = nullptr;
         IEventManager* eventManager_;
     };
 

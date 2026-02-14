@@ -145,36 +145,25 @@ namespace AngelEngine
             BroadcastAddBinding(binding);
         }
 
-        IEventManager* GetEventManager() const override { return eventManager_.get(); }
-
-    private:
-        explicit ScriptEngine(AsEnginePtr as_engine, 
-                              eastl::unique_ptr<IEngineComponentFactory> factory,
-                              bool useJit,
-                              bool useAutoGC) :
-            jit_(nullptr),
-            engine_(eastl::move(as_engine)),
-            useJit_(useJit),
-            useAutoGC_(useAutoGC)
-        {
-            // Use Factory to create components
-            moduleLoader_ = factory->CreateModuleLoader();
-            executionManager_ = factory->CreateExecutionManager();
-            stateSerializer_ = factory->CreateStateSerializer();
-            bindingManager_ = factory->CreateBindingManager();
-            eventManager_ = factory->CreateEventManager();
-
-            // Create and register EventBinding
-            eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
-            bindingManager_->AddBinding(eventBinding_.get());
-
-            InitializeEngine();
-        }
-
+        const eastl::unique_ptr<IEventManager>& GetEventManager() const override { return eventManager_; }
+        const eastl::unique_ptr<IBindingManager>& GetBindingManager() const override { return bindingManager_; }
+        const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const override { return executionManager_; }
+        const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const override { return moduleLoader_; }
+        const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const override { return stateSerializer_; }
+        
         void InitializeEngine()
         {
             // Set message callback with 'this' as user param
             engine_->SetMessageCallback(asFUNCTION(MessageCallback), this, asCALL_CDECL);
+
+            // Set Context Callbacks for Pooling
+            // asFUNCTION macro creates an asSFuncPtr, but SetContextCallbacks expects raw function pointers.
+            // Since our callbacks are static, we can pass them directly.
+            engine_->SetContextCallbacks(
+                RequestContextCallback,
+                ReturnContextCallback,
+                this
+            );
 
             if (useJit_)
             {
@@ -201,6 +190,28 @@ namespace AngelEngine
             
         }
 
+    private:
+        explicit ScriptEngine(AsEnginePtr as_engine, 
+                              eastl::unique_ptr<IEngineComponentFactory> factory,
+                              bool useJit,
+                              bool useAutoGC) :
+            jit_(nullptr),
+            engine_(eastl::move(as_engine)),
+            useJit_(useJit),
+            useAutoGC_(useAutoGC)
+        {
+            // Use Factory to create components
+            moduleLoader_ = factory->CreateModuleLoader();
+            executionManager_ = factory->CreateExecutionManager();
+            stateSerializer_ = factory->CreateStateSerializer();
+            bindingManager_ = factory->CreateBindingManager();
+            eventManager_ = factory->CreateEventManager();
+
+            // Create and register EventBinding
+            eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
+            // bindingManager_->AddBinding(eventBinding_.get()); // Removed: BindAll will handle this if we add it to the list, but wait...
+        }
+
         static void MessageCallback(const asSMessageInfo* msg, void* param)
         {
             ScriptEngine* self = static_cast<ScriptEngine*>(param);
@@ -210,11 +221,39 @@ namespace AngelEngine
             }
         }
 
+        static asIScriptContext* RequestContextCallback(asIScriptEngine* engine, void* param)
+        {
+            ScriptEngine* self = static_cast<ScriptEngine*>(param);
+            if (self && self->executionManager_)
+            {
+                return self->executionManager_->RequestContext(engine, param);
+            }
+            return nullptr;
+        }
+
+        static void ReturnContextCallback(asIScriptEngine* engine, asIScriptContext* ctx, void* param)
+        {
+            ScriptEngine* self = static_cast<ScriptEngine*>(param);
+            if (self && self->executionManager_)
+            {
+                self->executionManager_->ReturnContext(engine, ctx, param);
+            }
+        }
+
         void BindAll()
         {
+            // Manually bind EventBinding first or as part of the process
+            // Since EventBinding is not in the BindingManager's list by default (unless added), we bind it here.
+            // Wait, in the constructor we created eventBinding_ but didn't add it to bindingManager_ list properly?
+            // Ah, the previous code had: bindingManager_->AddBinding(eventBinding_.get());
+            // But BindAll iterates over bindings_.
             
-            // this->AddBinding(&globalBindings);
-            
+            // Let's make sure we bind the event system.
+            if (eventBinding_)
+            {
+                 bindingManager_->Bind(engine_.get(), eventBinding_.get());
+            }
+
             auto result = bindingManager_->BindAll(engine_.get());
             if (!result.has_value())
             {
@@ -259,6 +298,7 @@ namespace AngelEngine
             for (auto* listener : listeners_) listener->OnScriptMessage(engine_.get(), msg);
         }
 
+    private:
         eastl::unique_ptr<asCJITCompiler> jit_;
         AsEnginePtr engine_; 
 

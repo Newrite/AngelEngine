@@ -65,6 +65,7 @@ namespace AngelEngine
             if (it == listeners_.end()) return;
 
             // Optimization: Request context once for all listeners of this event
+            // This will use the Context Pool via RequestContextCallback in ScriptEngine
             asIScriptContext* ctx = engine->RequestContext();
             if (!ctx) return;
 
@@ -100,6 +101,7 @@ namespace AngelEngine
                 ctx->Unprepare();
             }
 
+            // Return context to the pool
             engine->ReturnContext(ctx);
         }
 

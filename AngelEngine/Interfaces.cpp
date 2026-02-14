@@ -124,11 +124,15 @@ namespace AngelEngine
     export struct IExecutionManager
     {
         virtual ~IExecutionManager() = default;
-        virtual void Tick(float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) = 0;
+        virtual void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) = 0;
         virtual void AbortAll() const = 0;
         virtual void Renew() = 0;
         virtual void RegisterThreadSupport(asIScriptEngine* engine) = 0;
         virtual eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine, const IModuleLoader* moduleLoader) = 0;
+        
+        // Context Pooling Callbacks
+        virtual asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) = 0;
+        virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) = 0;
     };
 
     export struct IStateSerializer
@@ -180,7 +184,11 @@ namespace AngelEngine
         virtual void AddBinding(IScriptBinding* binding) const = 0;
         virtual void CallGarbageCollectorFullCycle() = 0;
         virtual void CallGarbageColletorOneStep() = 0;
-        virtual IEventManager* GetEventManager() const = 0;
+        virtual const eastl::unique_ptr<IEventManager>& GetEventManager() const = 0;
+        virtual const eastl::unique_ptr<IBindingManager>& GetBindingManager() const = 0;
+        virtual const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const = 0;
+        virtual const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const = 0;
+        virtual const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const = 0;
 
         // Observer management
         virtual void AddListener(IEngineListener* listener) = 0;

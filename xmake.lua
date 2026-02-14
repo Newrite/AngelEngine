@@ -174,6 +174,8 @@ target("AngelScriptPlayground")
     add_files("src/main.cpp")
     add_deps("AngelEngine")
 
+    add_includedirs("asbind20/include")
+
     add_packages("eastl", {public = true})
     add_defines("EASTL_OPENSOURCE")
 

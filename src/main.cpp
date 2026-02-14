@@ -1,6 +1,7 @@
+#include <angelscript.h>
 #include <filesystem>
 #include <print>
-#include <memory>
+#include <asbind20/asbind.hpp>
 
 #include <EASTL/unique_ptr.h>
 
@@ -8,6 +9,23 @@ import AngelEngine.ScriptEngine;
 import AngelEngine.ModuleLoader;
 import AngelEngine.Interfaces;
 import AngelEngine.Infrastructure;
+
+struct PrintBinding final : AngelEngine::IScriptBinding
+{
+    // Function for script output (replaces cout)
+    static void scriptPrint(const std::string& msg)
+    {
+        // Здесь используется std::println из C++23, который пишет в консоль
+        std::println("[Script]: {}", msg);
+    }
+        
+    void Bind(asIScriptEngine* engine) override
+    {
+        // Регистрация функции "void print(const string &in msg)"
+        asbind20::global(engine)
+            .function("void print(const string &in msg)", &scriptPrint);
+    }
+} printBinding;
 
 int main() {
     
@@ -32,6 +50,9 @@ int main() {
     // Create and Register Listener (Observer)
     AngelEngine::ConsoleEngineListener listener;
     engine->AddListener(&listener);
+    
+    engine->AddBinding(&printBinding);
+    engine->InitializeEngine();
 
     if (!engine->CompileAllMods())
     {
@@ -41,10 +62,17 @@ int main() {
     {
         std::println("Fail run");
     }
-    if (!engine->HotReload())
-    {
-        std::println("Fail hot reload");
-    }
+    
+    engine->Tick(0.2);
+    engine->Tick(0.2);
+    engine->Tick(0.2);
+    engine->Tick(0.2);
+    engine->Tick(0.2);
+    
+    // if (!engine->HotReload())
+    // {
+    //     std::println("Fail hot reload");
+    // }
     
     engine->Tick(0.2);
     engine->Tick(0.2);

@@ -10,6 +10,7 @@ module;
 #include <EASTL/unique_ptr.h>
 #include <EASTL/expected.h>
 #include <EASTL/chrono.h>
+#include <EASTL/vector.h>
 
 export module AngelEngine.ExecutionManager;
 
@@ -32,6 +33,16 @@ namespace AngelEngine
         explicit ExecutionManager()
         {
             Init();
+        }
+        
+        ~ExecutionManager()
+        {
+            // Clean up pooled contexts
+            for (auto* ctx : contextPool_)
+            {
+                if (ctx) ctx->Release();
+            }
+            contextPool_.clear();
         }
 
         void AbortAll() const override
@@ -65,7 +76,7 @@ namespace AngelEngine
                         if (ev.argInjector) ev.argInjector(ctx);
                         
                         // Set callbacks for safety and debugging
-                        ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+                        // Note: RequestContextCallback already sets LineCallback, but we set ExceptionCallback here too just in case
                         ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
                     }
                     // Release the Ref we took when queuing
@@ -109,6 +120,42 @@ namespace AngelEngine
             // Register standard CoRoutine support (yield, createCoRoutine)
             contextMgr_->RegisterCoRoutineSupport(engine);
         }
+        
+        // --- Context Pooling Implementation ---
+
+        asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) override
+        {
+            // std::scoped_lock lock(mutex_);
+            asIScriptContext* ctx = nullptr;
+
+            if (!contextPool_.empty())
+            {
+                ctx = contextPool_.back();
+                contextPool_.pop_back();
+            }
+            else
+            {
+                ctx = engine->CreateContext();
+            }
+
+            if (ctx)
+            {
+                // Set Watchdog for EVERY context requested (including those for events)
+                ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+            }
+
+            return ctx;
+        }
+
+        void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) override
+        {
+            // std::scoped_lock lock(mutex_);
+            if (ctx)
+            {
+                ctx->Unprepare();
+                contextPool_.push_back(ctx);
+            }
+        }
 
     private:
         static asUINT GetSystemTimeMs()
@@ -122,16 +169,29 @@ namespace AngelEngine
         // --- Watchdog (LineCallback) ---
         static void LineCallback(asIScriptContext* ctx, void* param)
         {
+            // Optimization: Only check time every 1000 instructions
+            static int instructionCounter = 0;
+            if (++instructionCounter < 1000) return;
+            instructionCounter = 0;
+
             ExecutionManager* self = static_cast<ExecutionManager*>(param);
 
             // Check how much time has passed since the start of the frame (Tick)
             auto now = eastl::chrono::steady_clock::now();
             auto duration = eastl::chrono::duration_cast<eastl::chrono::milliseconds>(now - self->frameStartTime_).count();
+            // std::println("Now - {} FrameStart - {} Duration - {}", now.time_since_epoch().count(), self->frameStartTime_.time_since_epoch().count(), duration);
 
             if (duration > MAX_SCRIPT_EXEC_TIME_MS)
             {
                 std::println(stderr, "[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
                              MAX_SCRIPT_EXEC_TIME_MS);
+                
+                // Add useful context information before aborting
+                const char* section = "";
+                int line = ctx->GetLineNumber(0, 0, &section);
+                auto* func = ctx->GetFunction(0);
+                std::println(stderr, "           At: {} ({}:{})", func ? func->GetDeclaration() : "null", section, line);
+
                 ctx->Abort();
             }
         }
@@ -183,9 +243,8 @@ namespace AngelEngine
 
             if (ctx)
             {
-                // Set Watchdog and Exception Handler
-                ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
-                ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
+                // Set Exception Handler (LineCallback is set by RequestContextCallback via ContextMgr)
+                 ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
 
                 std::println("[ScriptEngine] Mod started via ContextMgr: {}", modName);
                 return {};
@@ -198,10 +257,14 @@ namespace AngelEngine
         {
             contextMgr_ = eastl::make_unique<CContextMgr>();
             contextMgr_->SetGetTimeCallback(GetSystemTimeMs);
+            frameStartTime_ = eastl::chrono::steady_clock::now();
         }
 
         ContextManagerPtr contextMgr_;
         std::mutex mutex_{};
+        
+        // Context Pool
+        eastl::vector<asIScriptContext*> contextPool_;
         
         // Frame start time (for Watchdog)
         eastl::chrono::steady_clock::time_point frameStartTime_;

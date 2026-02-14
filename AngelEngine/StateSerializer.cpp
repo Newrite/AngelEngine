@@ -74,6 +74,13 @@ namespace AngelEngine
 
             // Re-create manager to clear old references
             executionManager->Renew();
+            
+            const auto runResult = executionManager->RunAllMods(engine, moduleLoader.get());
+            if (!runResult.has_value())
+            {
+                return runResult.transform_error([](ExecutionError e) { return ModuleLoaderError::LoadScriptError; }
+);
+            }
 
             std::println("[ScriptEngine] HotReload completed. Restored state for {} mods.", restoredCount);
             return {};
