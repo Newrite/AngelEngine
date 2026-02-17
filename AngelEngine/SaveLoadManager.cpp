@@ -5,6 +5,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint>
+#include <print>
 
 #include <EASTL/vector.h>
 #include <EASTL/string.h>
@@ -140,6 +141,7 @@ namespace AngelEngine
             }
 
             // Unknown type
+            std::println(stderr, "[BinarySerializer] Unknown type ID: {}", typeId);
             return false;
         }
 
@@ -234,6 +236,7 @@ namespace AngelEngine
                 return true;
             }
 
+            std::println(stderr, "[BinarySerializer] Unknown type ID: {}", typeId);
             return false;
         }
 
@@ -302,6 +305,7 @@ namespace AngelEngine
                         // Save Value
                         if (!serializer.SaveValue(ref, typeId))
                         {
+                            std::println(stderr, "[SaveLoadManager] Failed to save variable: {} (TypeID: {})", varName.c_str(), typeId);
                             return false;
                         }
                     }

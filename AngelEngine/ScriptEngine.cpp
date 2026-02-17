@@ -59,8 +59,6 @@ namespace AngelEngine
                 useAutoGC
             ));
             
-            scriptEngine->InitializeEngine();
-            
             return scriptEngine;
         }
 

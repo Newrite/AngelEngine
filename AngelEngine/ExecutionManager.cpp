@@ -113,6 +113,8 @@ namespace AngelEngine
                     std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
                 }
             }
+            
+            contextMgr_->ExecuteScripts();
 
             return {};
         }
