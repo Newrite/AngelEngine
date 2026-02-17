@@ -70,10 +70,10 @@ int main() {
     engine->Tick(0.2);
     engine->Tick(0.2);
     
-    // if (!engine->HotReload())
-    // {
-    //     std::println("Fail hot reload");
-    // }
+    if (!engine->HotReload())
+    {
+        std::println("Fail hot reload");
+    }
     
     engine->Tick(0.2);
     engine->Tick(0.2);

@@ -144,6 +144,7 @@ target("AngelEngine")
 
     add_packages("eastl", {public = true})
     add_defines("EASTL_OPENSOURCE")
+    add_defines("AS_PROCESS_METADATA=1")
     -- add_defines("EASTL_USER_DEFINED_ALLOCATOR=0")
 
     add_files("AngelEngine/**.cpp", {public = true})

@@ -1,9 +1,7 @@
 module;
 
 #include <filesystem>
-
 #include <print>
-
 #include <angelscript.h>
 
 #include <EASTL/string.h>
@@ -15,7 +13,8 @@ export module AngelEngine.Infrastructure;
 import AngelEngine.Interfaces;
 import AngelEngine.ModuleLoader;
 import AngelEngine.ExecutionManager;
-import AngelEngine.StateSerializer;
+import AngelEngine.ReloadManager;
+import AngelEngine.SaveLoadManager;
 import AngelEngine.BindingManager;
 import AngelEngine.EventManager;
 
@@ -138,7 +137,6 @@ namespace AngelEngine
 
         eastl::unique_ptr<IModuleLoader> CreateModuleLoader() override
         {
-            // Inject the FileSystem Strategy into the ModuleLoader
             auto provider = eastl::make_unique<FileSystemScriptSourceProvider>(config_);
             return eastl::make_unique<ModuleLoader>(eastl::move(provider));
         }
@@ -148,9 +146,14 @@ namespace AngelEngine
             return eastl::make_unique<ExecutionManager>();
         }
 
-        eastl::unique_ptr<IStateSerializer> CreateStateSerializer() override
+        eastl::unique_ptr<IReloadManager> CreateReloadManager() override
         {
-            return eastl::make_unique<StateSerializer>();
+            return eastl::make_unique<ReloadManager>();
+        }
+
+        eastl::unique_ptr<ISaveLoadManager> CreateSaveLoadManager() override
+        {
+            return eastl::make_unique<SaveLoadManager>();
         }
 
         eastl::unique_ptr<IBindingManager> CreateBindingManager() override

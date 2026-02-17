@@ -8,6 +8,7 @@ module;
 
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
+#include <EASTL/map.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/expected.h>
 
@@ -40,10 +41,22 @@ namespace AngelEngine
             return loaded_modules_.empty();
         }
 
+        const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const override
+        {
+            auto it = saveable_vars_cache_.find(modName);
+            if (it != saveable_vars_cache_.end())
+            {
+                return it->second;
+            }
+            static const eastl::vector<eastl::string> empty;
+            return empty;
+        }
+
         eastl::expected<void, ModuleLoaderError> CompileAllMods(asIScriptEngine* engine) override
         {
             std::scoped_lock lock(mutex_);
             loaded_modules_.clear();
+            saveable_vars_cache_.clear();
 
             eastl::vector<eastl::string> availableMods = provider_->GetAvailableMods();
             if (availableMods.empty())
@@ -79,7 +92,7 @@ namespace AngelEngine
         }
 
         eastl::expected<void, ModuleLoaderError> CompileSingleMod(asIScriptEngine* engine,
-                                                                const eastl::string& modName) const
+                                                                const eastl::string& modName)
         {
             int r = builder_->StartNewModule(engine, modName.c_str());
             if (r < 0)
@@ -114,12 +127,47 @@ namespace AngelEngine
                 return eastl::unexpected(ModuleLoaderError::BuildModuleError);
             }
 
+            // Parse metadata for saveable variables
+            saveable_vars_cache_.erase(modName); // Clear cache for this module
+            asIScriptModule* mod = builder_->GetModule();
+            if (mod)
+            {
+                int globalVarCount = mod->GetGlobalVarCount();
+                for (int i = 0; i < globalVarCount; ++i)
+                {
+                    // GetMetadataForVar returns a std::vector<std::string>
+                    std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
+                    
+                    // Check if any of the metadata strings is "Save"
+                    bool isSaveable = false;
+                    for (const auto& meta : metadataList)
+                    {
+                        if (meta == "Save")
+                        {
+                            isSaveable = true;
+                            break;
+                        }
+                    }
+
+                    if (isSaveable)
+                    {
+                        const char* varName = nullptr;
+                        mod->GetGlobalVar(i, &varName);
+                        if (varName)
+                        {
+                            saveable_vars_cache_[modName].push_back(varName);
+                        }
+                    }
+                }
+            }
+
             std::println("[ScriptEngine] + Loaded mod: {}", modName.c_str());
             return {};
         }
 
         std::mutex mutex_;
         eastl::vector<eastl::string> loaded_modules_;
+        mutable eastl::map<eastl::string, eastl::vector<eastl::string>> saveable_vars_cache_;
         eastl::unique_ptr<CScriptBuilder> builder_;
         eastl::unique_ptr<IScriptSourceProvider> provider_;
     };

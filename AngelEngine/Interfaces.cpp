@@ -91,6 +91,7 @@ namespace AngelEngine
         virtual eastl::expected<void, ModuleLoaderError> CompileAllMods(asIScriptEngine* engine) = 0;
         virtual const eastl::vector<eastl::string>& GetLoadedModules() const = 0;
         virtual bool Empty() const = 0;
+        virtual const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const = 0;
     };
 
     // Функция, которую передает пользователь (код Скайрима), 
@@ -135,10 +136,17 @@ namespace AngelEngine
         virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) = 0;
     };
 
-    export struct IStateSerializer
+    export struct IReloadManager
     {
-        virtual ~IStateSerializer() = default;
-        virtual eastl::expected<void, ModuleLoaderError> HotReload(asIScriptEngine* engine, const eastl::unique_ptr<IModuleLoader>& moduleLoader, const eastl::unique_ptr<IExecutionManager>& executionManager, const eastl::unique_ptr<IEventManager>& eventManager) = 0;
+        virtual ~IReloadManager() = default;
+        virtual eastl::expected<void, ModuleLoaderError> ReloadScripts(asIScriptEngine* engine, IModuleLoader* moduleLoader, IExecutionManager* executionManager, IEventManager* eventManager) = 0;
+    };
+
+    export struct ISaveLoadManager
+    {
+        virtual ~ISaveLoadManager() = default;
+        virtual bool GetSaveData(asIScriptEngine* engine, IModuleLoader* loader, eastl::vector<uint8_t>& outData) = 0;
+        virtual bool LoadFromData(asIScriptEngine* engine, const eastl::vector<uint8_t>& data) = 0;
     };
 
     export struct IBindingManager
@@ -156,7 +164,8 @@ namespace AngelEngine
         virtual ~IEngineComponentFactory() = default;
         virtual eastl::unique_ptr<IModuleLoader> CreateModuleLoader() = 0;
         virtual eastl::unique_ptr<IExecutionManager> CreateExecutionManager() = 0;
-        virtual eastl::unique_ptr<IStateSerializer> CreateStateSerializer() = 0;
+        virtual eastl::unique_ptr<IReloadManager> CreateReloadManager() = 0;
+        virtual eastl::unique_ptr<ISaveLoadManager> CreateSaveLoadManager() = 0;
         virtual eastl::unique_ptr<IBindingManager> CreateBindingManager() = 0;
         virtual eastl::unique_ptr<IEventManager> CreateEventManager() = 0;
     };
@@ -182,7 +191,8 @@ namespace AngelEngine
         virtual const eastl::unique_ptr<IBindingManager>& GetBindingManager() const = 0;
         virtual const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const = 0;
         virtual const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const = 0;
-        virtual const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const = 0;
+        virtual const eastl::unique_ptr<IReloadManager>& GetReloadManager() const = 0;
+        virtual const eastl::unique_ptr<ISaveLoadManager>& GetSaveLoadManager() const = 0;
     };
 
     export struct IScriptEngine

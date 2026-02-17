@@ -18,15 +18,14 @@ import AngelEngine.BindingManager;
 import AngelEngine.PredefinedGenerator;
 import AngelEngine.ModuleLoader;
 import AngelEngine.ExecutionManager;
-import AngelEngine.StateSerializer;
+import AngelEngine.ReloadManager;
+import AngelEngine.SaveLoadManager;
 import AngelEngine.Interfaces;
 
 namespace fs = std::filesystem;
 
 namespace AngelEngine
 {
-    // Configurations are now handled by the Factory
-
     struct AngelScriptDeleter
     {
         void operator()(asIScriptEngine* engine) const
@@ -136,7 +135,7 @@ namespace AngelEngine
         {
             BroadcastHotReloadStarted();
             
-            auto resultHotReload = stateSerializer_->HotReload(engine_.get(), moduleLoader_, executionManager_, eventManager_);
+            auto resultHotReload = reloadManager_->ReloadScripts(engine_.get(), moduleLoader_.get(), executionManager_.get(), eventManager_.get());
             BroadcastHotReloadFinished();
 
             if (!resultHotReload.has_value())
@@ -157,17 +156,14 @@ namespace AngelEngine
         const eastl::unique_ptr<IBindingManager>& GetBindingManager() const override { return bindingManager_; }
         const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const override { return executionManager_; }
         const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const override { return moduleLoader_; }
-        const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const override { return stateSerializer_; }
+        const eastl::unique_ptr<IReloadManager>& GetReloadManager() const override { return reloadManager_; }
+        const eastl::unique_ptr<ISaveLoadManager>& GetSaveLoadManager() const override { return saveLoadManager_; }
         asIScriptEngine* GetEngine() const override { return engine_.get(); }
         
         void InitializeEngine()
         {
-            // Set message callback with 'this' as user param
             engine_->SetMessageCallback(asFUNCTION(MessageCallback), this, asCALL_CDECL);
 
-            // Set Context Callbacks for Pooling
-            // asFUNCTION macro creates an asSFuncPtr, but SetContextCallbacks expects raw function pointers.
-            // Since our callbacks are static, we can pass them directly.
             engine_->SetContextCallbacks(
                 RequestContextCallback,
                 ReturnContextCallback,
@@ -196,7 +192,6 @@ namespace AngelEngine
             BindAll();
             GenerateScriptPredefined(engine_.get(), AS_PREDEFINED_PATH);
             BroadcastEngineInitialized();
-            
         }
 
     private:
@@ -209,16 +204,14 @@ namespace AngelEngine
             useJit_(useJit),
             useAutoGC_(useAutoGC)
         {
-            // Use Factory to create components
             moduleLoader_ = factory->CreateModuleLoader();
             executionManager_ = factory->CreateExecutionManager();
-            stateSerializer_ = factory->CreateStateSerializer();
+            reloadManager_ = factory->CreateReloadManager();
+            saveLoadManager_ = factory->CreateSaveLoadManager();
             bindingManager_ = factory->CreateBindingManager();
             eventManager_ = factory->CreateEventManager();
 
-            // Create and register EventBinding
             eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
-            // bindingManager_->AddBinding(eventBinding_.get()); // Removed: BindAll will handle this if we add it to the list, but wait...
         }
 
         static void MessageCallback(const asSMessageInfo* msg, void* param)
@@ -251,13 +244,6 @@ namespace AngelEngine
 
         void BindAll()
         {
-            // Manually bind EventBinding first or as part of the process
-            // Since EventBinding is not in the BindingManager's list by default (unless added), we bind it here.
-            // Wait, in the constructor we created eventBinding_ but didn't add it to bindingManager_ list properly?
-            // Ah, the previous code had: bindingManager_->AddBinding(eventBinding_.get());
-            // But BindAll iterates over bindings_.
-            
-            // Let's make sure we bind the event system.
             if (eventBinding_)
             {
                  bindingManager_->Bind(engine_.get(), eventBinding_.get());
@@ -278,8 +264,6 @@ namespace AngelEngine
                 // TODO: Broadcast error
             }
         }
-
-        // --- Notification Helpers ---
 
         void BroadcastEngineInitialized() const
         {
@@ -323,18 +307,16 @@ namespace AngelEngine
         std::mutex mutex_;
         eastl::vector<IEngineListener*> listeners_;
 
-        // Configurations
         bool useJit_;
         bool useAutoGC_;
 
-        // Components
         eastl::unique_ptr<IModuleLoader> moduleLoader_;
         eastl::unique_ptr<IExecutionManager> executionManager_;
-        eastl::unique_ptr<IStateSerializer> stateSerializer_;
+        eastl::unique_ptr<IReloadManager> reloadManager_;
+        eastl::unique_ptr<ISaveLoadManager> saveLoadManager_;
         eastl::unique_ptr<IBindingManager> bindingManager_;
         eastl::unique_ptr<IEventManager> eventManager_;
         
-        // Bindings
         eastl::unique_ptr<IScriptBinding> eventBinding_;
     };
 }
