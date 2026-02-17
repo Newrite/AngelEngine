@@ -51,14 +51,29 @@ namespace AngelEngine
     class BinarySerializer
     {
     public:
-        BinarySerializer(asIScriptEngine* engine, asIBinaryStream* stream)
-            : engine_(engine), stream_(stream)
+        BinarySerializer(asIScriptEngine* engine, asIBinaryStream* stream, const eastl::vector<ISerializationHandler*>& handlers)
+            : engine_(engine), stream_(stream), handlers_(handlers)
         {
             stringTypeId_ = engine_->GetTypeIdByDecl("string");
         }
 
         bool SaveValue(void* ptr, int typeId)
         {
+            // 0. Custom Handlers
+            for (auto* handler : handlers_)
+            {
+                if (handler->CanHandle(typeId))
+                {
+                    void* objectPtr = ptr;
+                    if (typeId & asTYPEID_OBJHANDLE)
+                    {
+                        objectPtr = *static_cast<void**>(ptr);
+                    }
+                    handler->Save(engine_, objectPtr, stream_);
+                    return true;
+                }
+            }
+
             // 1. Handle std::string
             if (typeId == stringTypeId_)
             {
@@ -130,6 +145,16 @@ namespace AngelEngine
 
         bool LoadValue(void* ptr, int typeId)
         {
+            // 0. Custom Handlers
+            for (auto* handler : handlers_)
+            {
+                if (handler->CanHandle(typeId))
+                {
+                    handler->Restore(engine_, ptr, stream_);
+                    return true;
+                }
+            }
+
             // 1. Handle std::string
             if (typeId == stringTypeId_)
             {
@@ -215,17 +240,23 @@ namespace AngelEngine
     private:
         asIScriptEngine* engine_;
         asIBinaryStream* stream_;
+        const eastl::vector<ISerializationHandler*>& handlers_;
         int stringTypeId_;
     };
 
     export class SaveLoadManager final : public ISaveLoadManager
     {
     public:
+        void AddHandler(ISerializationHandler* handler) override
+        {
+            handlers_.push_back(handler);
+        }
+
         bool GetSaveData(asIScriptEngine* engine, IModuleLoader* loader, eastl::vector<uint8_t>& outData) override
         {
             outData.clear();
             ByteStream stream(outData);
-            BinarySerializer serializer(engine, &stream);
+            BinarySerializer serializer(engine, &stream, handlers_);
 
             const auto& modules = loader->GetLoadedModules();
             uint32_t modCount = static_cast<uint32_t>(modules.size());
@@ -295,7 +326,7 @@ namespace AngelEngine
         {
             if (data.empty()) return false;
             ByteStream stream(data);
-            BinarySerializer serializer(engine, &stream);
+            BinarySerializer serializer(engine, &stream, handlers_);
 
             uint32_t modCount = 0;
             if (stream.Read(&modCount, sizeof(modCount)) < 0) return false;
@@ -360,5 +391,8 @@ namespace AngelEngine
             }
             return true;
         }
+
+    private:
+        eastl::vector<ISerializationHandler*> handlers_;
     };
 }

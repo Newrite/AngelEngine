@@ -142,11 +142,20 @@ namespace AngelEngine
         virtual eastl::expected<void, ModuleLoaderError> ReloadScripts(asIScriptEngine* engine, IModuleLoader* moduleLoader, IExecutionManager* executionManager, IEventManager* eventManager) = 0;
     };
 
+    export struct ISerializationHandler
+    {
+        virtual ~ISerializationHandler() = default;
+        virtual bool CanHandle(int typeId) const = 0;
+        virtual void Save(asIScriptEngine* engine, void* objectPtr, asIBinaryStream* stream) = 0;
+        virtual void Restore(asIScriptEngine* engine, void* ptrToHandle, asIBinaryStream* stream) = 0;
+    };
+
     export struct ISaveLoadManager
     {
         virtual ~ISaveLoadManager() = default;
         virtual bool GetSaveData(asIScriptEngine* engine, IModuleLoader* loader, eastl::vector<uint8_t>& outData) = 0;
         virtual bool LoadFromData(asIScriptEngine* engine, const eastl::vector<uint8_t>& data) = 0;
+        virtual void AddHandler(ISerializationHandler* handler) = 0;
     };
 
     export struct IBindingManager
