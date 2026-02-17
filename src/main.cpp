@@ -27,6 +27,8 @@ void SetupEnvironment() {
     fs::create_directories("angelscripts/mods/EventTest");
     fs::create_directories("angelscripts/mods/LoopTest");
     fs::create_directories("angelscripts/mods/AddonTest");
+    fs::create_directories("angelscripts/mods/CoroutineTest");
+    fs::create_directories("angelscripts/mods/ExceptionTest");
 
     // Create dummy std lib
     {
@@ -110,6 +112,30 @@ void SetupEnvironment() {
                 int val;
                 dict.get("key", val);
                 print("Dict value: " + val);
+            }
+        )";
+    }
+
+    // Create CoroutineTest script
+    {
+        std::ofstream file("angelscripts/mods/CoroutineTest/main.as");
+        file << R"(
+            void main() {
+                print("Routine Start");
+                sleep(200); // Sleep 200ms
+                print("Routine End");
+            }
+        )";
+    }
+
+    // Create ExceptionTest script
+    {
+        std::ofstream file("angelscripts/mods/ExceptionTest/main.as");
+        file << R"(
+            void main() {
+                print("About to crash...");
+                int a = 0;
+                int b = 10 / a; // Divide by zero
             }
         )";
     }
@@ -354,80 +380,7 @@ int main() {
     TEST_ASSERT(loopMain != nullptr, "LoopTest main not found");
 
     // Create a context specifically for this test to catch the abort
-    ctx = engine->GetEngine()->CreateContext();
-    ctx->Prepare(loopMain);
-    
-    // We expect this to be aborted by the watchdog (which should be active in the engine)
-    // The engine usually sets a line callback or similar.
-    // Assuming the engine is configured with a watchdog.
-    
-    // IMPORTANT: We must set the line callback for this specific context if it's not automatically set by CreateContext.
-    // In ScriptEngine::InitializeEngine, we set context callbacks, but let's double check if RequestContextCallback sets the line callback.
-    // Looking at ExecutionManager::RequestContext, it DOES set the line callback.
-    // However, here we are calling engine->GetEngine()->CreateContext() directly, bypassing ExecutionManager::RequestContext!
-    // This is why the watchdog might not be active for this specific context if we don't use the manager.
-    // But wait, the engine is configured with SetContextCallbacks, so CreateContext() inside AngelScript might call RequestContextCallback?
-    // No, SetContextCallbacks is for when the ENGINE creates a context (e.g. for internal use or maybe when we call CreateContext via the engine interface if it wraps it).
-    // Actually, asIScriptEngine::CreateContext() creates a context. The callbacks are used when the engine needs a context (e.g. for ExecuteString or similar helpers, or maybe internal calls).
-    // If we manually create a context, we are responsible for setting up the callbacks unless we use a helper from ExecutionManager.
-    
-    // Let's use the ExecutionManager to request a context to ensure it's set up correctly with the watchdog.
-    // But IScriptEngineGetters exposes GetExecutionManager(), so we can use that.
-    // However, RequestContext is part of IExecutionManager but it takes (engine, param).
-    // Let's just manually set the line callback here to be safe and consistent with the test environment, 
-    // OR better, we should fix the test to use the proper way to get a context if possible.
-    // Since we don't have easy access to the internal LineCallback function of ExecutionManager from here (it's private/static in ExecutionManager.cpp),
-    // we rely on the fact that we should probably use the engine's mechanism or just accept that we need to fix how we run this test.
-    
-    // Wait, the log shows:
-    // [Watchdog] Script aborted! Execution exceeded 1000ms in a single frame.
-    // So the watchdog IS working!
-    // The problem is "infiniti stack on this" in the user prompt.
-    // Ah, the user said "infiniti stack on this" at the end of the output.
-    // And the output shows:
-    // Executing infinite loop script...
-    // [Script] Starting infinite loop...
-    //
-    // And then it seems to hang or crash?
-    // No, the log shows:
-    // [Watchdog] Script aborted! ...
-    // But then it says "infiniti stack on this" which implies a stack overflow or infinite recursion in the LOGGING or something?
-    // Or maybe the user just meant "infinite loop on this" and it's stuck?
-    
-    // Let's look at the log again.
-    // It printed "[Script] Starting infinite loop..."
-    // Then nothing after that in the Phase 7 section.
-    // The previous "[Watchdog] Script aborted!" was during "Running mods..." at the beginning (Phase 0/Init).
-    // Why did it run during Init?
-    // Because `engine->RunAllMods()` runs ALL mods, including LoopTest!
-    // And LoopTest has a `main()` that runs an infinite loop.
-    // So `RunAllMods` executed `LoopTest::main`, which triggered the watchdog, aborted, and then `RunAllMods` continued.
-    
-    // Then in Phase 7, we manually run it again.
-    // `ctx->Execute()` is called.
-    // But we created the context using `engine->GetEngine()->CreateContext()`.
-    // Does this context have the LineCallback set?
-    // As I suspected, `asIScriptEngine::CreateContext()` does NOT automatically set the line callback unless we do it manually or use a wrapper.
-    // The `SetContextCallbacks` in `ScriptEngine::InitializeEngine` registers `RequestContextCallback`.
-    // AngelScript calls this callback when IT needs a context (e.g. internally).
-    // But `engine->CreateContext()` is a direct API call. It returns a new context. It does NOT call the RequestContextCallback.
-    // So the context we created in Phase 7 does NOT have the watchdog (LineCallback) configured!
-    // That's why it hangs (infinite loop without watchdog).
-    
-    // Solution:
-    // We need to set the line callback on the context we create in Phase 7.
-    // But `LineCallback` is a private static method in `ExecutionManager`. We can't access it from `main.cpp`.
-    // However, `ExecutionManager` exposes `RequestContext`.
-    // We should use `engine->GetExecutionManager()->RequestContext(engine->GetEngine(), nullptr)` to get a context.
-    // This method sets up the LineCallback.
-    
-    // Let's modify main.cpp to use ExecutionManager::RequestContext.
-    
-    // Also, we should probably prevent LoopTest from running during `RunAllMods` at the start, or just accept it runs and aborts.
-    // The log showed it aborted successfully during the initial run, which proves the watchdog works for contexts managed by ExecutionManager (which RunAllMods uses).
-    
-    // So the fix is to use `RequestContext` in Phase 7.
-    
+    // Use RequestContext to ensure Watchdog (LineCallback) is set up
     asIScriptContext* loopCtx = engine->GetExecutionManager()->RequestContext(engine->GetEngine(), nullptr);
     TEST_ASSERT(loopCtx != nullptr, "Failed to request context from ExecutionManager");
     
@@ -441,10 +394,6 @@ int main() {
     
     // Return the context
     engine->GetExecutionManager()->ReturnContext(engine->GetEngine(), loopCtx, nullptr);
-    
-    // Note: We also used CreateContext() in Phase 6 and 8. 
-    // Those are fine because they don't need the watchdog (they are short), but for consistency we could use RequestContext there too.
-    // However, the critical one is Phase 7.
 
     // Phase 8: Standard Addons Test
     std::println("Phase 8: Standard Addons Test");
@@ -471,6 +420,149 @@ int main() {
     }
     TEST_ASSERT(foundArray, "Array test failed");
     TEST_ASSERT(foundDict, "Dictionary test failed");
+
+    // Phase 9: Coroutine Test
+    std::println("Phase 9: Coroutine Test");
+    testBinding->capturedOutput.clear();
+
+    // We need to run CoroutineTest via ExecutionManager so it handles sleep/yield
+    // But RunAllMods runs everything. We want to target CoroutineTest.
+    // ExecutionManager doesn't expose StartModContext directly (it's private).
+    // However, we can manually add a context to ContextMgr if we had access to it, but we don't.
+    // Wait, RunAllMods runs all mods that are loaded.
+    // We can just rely on the fact that we can manually create a context and use the ContextMgr if exposed,
+    // OR we can use the fact that `RunAllMods` iterates over loaded modules.
+    // But we want to test the sleep functionality which requires the ContextMgr to manage the context.
+    // The `ExecutionManager` manages contexts.
+    // If we look at `ExecutionManager::RunAllMods`, it calls `StartModContext` for each mod.
+    // `StartModContext` adds the context to `contextMgr_`.
+    // So if we call `RunAllMods`, it will start `CoroutineTest`.
+    // But it will also restart `TestMod`, `EventTest`, `LoopTest`, `AddonTest`...
+    // That might be noisy but acceptable if we filter output.
+    // Alternatively, we can unload other modules? No, IModuleLoader interface doesn't show Unload.
+    
+    // Let's try to use `RunAllMods` but we need to be careful about side effects.
+    // Actually, `RunAllMods` returns `eastl::expected<void, ExecutionError>`.
+    // It starts the contexts.
+    // Then we call `Tick`.
+    
+    // Let's clear output first.
+    testBinding->capturedOutput.clear();
+    
+    // We only care about CoroutineTest output.
+    // "Routine Start" -> sleep -> "Routine End"
+    
+    // We can't easily isolate just one mod with the current `RunAllMods` API.
+    // However, for this test, maybe we can just run everything and check the logs.
+    // But `LoopTest` will abort again, which is annoying.
+    // `TestMod` will print stuff.
+    
+    // Ideally we would have `engine->GetExecutionManager()->ExecuteMod("CoroutineTest")`.
+    // Since we don't, let's just manually create a context and register it with the ContextMgr?
+    // `ExecutionManager` has `RequestContext` but that just gives a context, it doesn't add it to the `CContextMgr` for scheduling.
+    // `CContextMgr` is internal to `ExecutionManager`.
+    
+    // Wait, `ExecutionManager` has `Tick`.
+    // If we can somehow inject the context into the manager...
+    // `IExecutionManager` interface:
+    // virtual void Tick(...)
+    // virtual eastl::expected<void, ExecutionError> RunAllMods(...)
+    
+    // It seems we are forced to use `RunAllMods` to use the `CContextMgr` features (like sleep) unless we modify the engine API.
+    // But wait, `LoopTest` aborting is fine, it just prints an error.
+    // `TestMod` is fine.
+    
+    // Let's use `RunAllMods`.
+    std::println("Starting Coroutine Test via RunAllMods...");
+    engine->RunAllMods(); 
+    
+    // Step 1: Tick(0.0f) - Should execute "Routine Start" and then sleep.
+    engine->Tick(0.0f);
+    
+    bool routineStart = false;
+    bool routineEnd = false;
+    
+    for (const auto& line : testBinding->capturedOutput) {
+        if (line.find("Routine Start") != std::string::npos) routineStart = true;
+        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+    }
+    
+    TEST_ASSERT(routineStart, "Coroutine should have started");
+    TEST_ASSERT(!routineEnd, "Coroutine should be sleeping, not ended");
+    
+    // Step 2: Simulate waiting 100ms.
+    // We need to advance time. The `Tick` takes `deltaTime`.
+    // But `CContextMgr` uses `GetSystemTimeAsUInt` callback which uses `steady_clock`.
+    // So we actually need to sleep the thread or mock the time.
+    // The `ExecutionManager` implementation uses `GetSystemTimeMs` from `std::chrono::steady_clock`.
+    // So passing `deltaTime` to `Tick` might not affect `sleep()` if `sleep()` relies on system time.
+    // Let's check `ExecutionManager.cpp`.
+    // `contextMgr_->SetGetTimeCallback(GetSystemTimeAsUInt);`
+    // So yes, it uses real time.
+    
+    std::println("Sleeping 100ms...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    engine->Tick(0.0f); // Delta time doesn't matter for sleep() if it uses system time
+    
+    routineEnd = false;
+    for (const auto& line : testBinding->capturedOutput) {
+        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+    }
+    TEST_ASSERT(!routineEnd, "Coroutine should still be sleeping (100ms < 200ms)");
+    
+    // Step 3: Simulate waiting 150ms more (total > 200ms).
+    std::println("Sleeping 150ms...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    engine->Tick(0.0f);
+    
+    routineEnd = false;
+    for (const auto& line : testBinding->capturedOutput) {
+        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+    }
+    TEST_ASSERT(routineEnd, "Coroutine should have ended");
+
+    // Phase 10: Exception Test
+    std::println("Phase 10: Exception Test");
+    
+    asIScriptModule* exceptMod = engine->GetEngine()->GetModule("ExceptionTest");
+    TEST_ASSERT(exceptMod != nullptr, "Module ExceptionTest not found");
+    
+    asIScriptFunction* exceptMain = exceptMod->GetFunctionByDecl("void main()");
+    TEST_ASSERT(exceptMain != nullptr, "ExceptionTest main not found");
+    
+    // Use RequestContext to ensure we have exception callback set up (if RequestContext sets it)
+    // ExecutionManager::RequestContext sets LineCallback.
+    // ExecutionManager::StartModContext sets ExceptionCallback.
+    // ExecutionManager::Tick sets ExceptionCallback for events.
+    // But RequestContext does NOT set ExceptionCallback in the current implementation of ExecutionManager.cpp!
+    // It only sets LineCallback.
+    // So we need to manually set the exception callback or rely on the default one if any?
+    // The engine doesn't have a default exception callback for contexts unless set.
+    // However, `ScriptEngine::InitializeEngine` sets `SetContextCallbacks` which might handle it?
+    // No, that's for context creation/return.
+    
+    // We should manually set the exception callback or just check the return value.
+    // `ctx->Execute()` returns `asEXECUTION_EXCEPTION`.
+    // And we can check `ctx->GetExceptionString()`.
+    
+    asIScriptContext* exceptCtx = engine->GetExecutionManager()->RequestContext(engine->GetEngine(), nullptr);
+    TEST_ASSERT(exceptCtx != nullptr, "Failed to request context");
+    
+    exceptCtx->Prepare(exceptMain);
+    
+    std::println("Executing exception script...");
+    r = exceptCtx->Execute();
+    
+    std::println("Exception execution result: {}", r);
+    TEST_ASSERT(r == asEXECUTION_EXCEPTION, "Script should have thrown an exception");
+    
+    std::string exceptionStr = exceptCtx->GetExceptionString();
+    std::println("Exception string: {}", exceptionStr);
+    TEST_ASSERT(exceptionStr.find("Divide by zero") != std::string::npos, "Exception should be 'Divide by zero'");
+    
+    engine->GetExecutionManager()->ReturnContext(engine->GetEngine(), exceptCtx, nullptr);
+    
+    std::println("Exception test passed");
 
     std::println("SUCCESS: All tests passed.");
     return 0;
