@@ -51,8 +51,9 @@ int main() {
     AngelEngine::ConsoleEngineListener listener;
     engine->AddListener(&listener);
     
-    engine->AddBinding(&printBinding);
-    engine->InitializeEngine();
+    // engine->AddBinding(&printBinding);
+    engine->GetBindingManager()->Bind(engine->GetEngine(), &printBinding);
+    // engine->InitializeEngine();
 
     if (!engine->CompileAllMods())
     {

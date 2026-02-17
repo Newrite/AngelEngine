@@ -173,6 +173,17 @@ namespace AngelEngine
         virtual void OnAddBinding(asIScriptEngine* engine, IScriptBinding* binding) {}
         virtual void OnScriptMessage(asIScriptEngine* engine, const asSMessageInfo* msg) {} // Redirects AS logs
     };
+    
+    export struct IScriptEngineGetters
+    {
+        virtual ~IScriptEngineGetters() = default;
+        virtual asIScriptEngine* GetEngine() const = 0;
+        virtual const eastl::unique_ptr<IEventManager>& GetEventManager() const = 0;
+        virtual const eastl::unique_ptr<IBindingManager>& GetBindingManager() const = 0;
+        virtual const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const = 0;
+        virtual const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const = 0;
+        virtual const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const = 0;
+    };
 
     export struct IScriptEngine
     {
@@ -184,11 +195,6 @@ namespace AngelEngine
         virtual void AddBinding(IScriptBinding* binding) const = 0;
         virtual void CallGarbageCollectorFullCycle() = 0;
         virtual void CallGarbageColletorOneStep() = 0;
-        virtual const eastl::unique_ptr<IEventManager>& GetEventManager() const = 0;
-        virtual const eastl::unique_ptr<IBindingManager>& GetBindingManager() const = 0;
-        virtual const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const = 0;
-        virtual const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const = 0;
-        virtual const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const = 0;
 
         // Observer management
         virtual void AddListener(IEngineListener* listener) = 0;

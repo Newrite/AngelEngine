@@ -27,14 +27,11 @@ import AngelEngine.Interfaces;
 namespace AngelEngine
 {
     
-    IEventManager* eventManager;
-
     export class EventBinding final : public IScriptBinding
     {
     public:
         explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager)
         {
-            eventManager = eventManager_;
         }
 
         void Bind(asIScriptEngine* engine) override
@@ -48,7 +45,8 @@ namespace AngelEngine
             int r = engine->RegisterGlobalFunction(
                             "void Subscribe(const string &in eventName, ?&in callback)",
                             asFUNCTION(ProxySubscribe),
-                            asCALL_CDECL
+                            asCALL_CDECL_OBJLAST,
+                            this
                         );
 
             if (r < 0)
@@ -58,10 +56,10 @@ namespace AngelEngine
         }
 
     private:
-        // [FIX] Исправлена сигнатура C++ функции для соответствия asCALL_CDECL и типам AS
-        static void ProxySubscribe(const std::string& eventName, void* callbackRef, int typeId)
+        // [FIX] Исправлена сигнатура C++ функции для соответствия asCALL_CDECL_OBJLAST и типам AS
+        static void ProxySubscribe(const std::string& eventName, void* callbackRef, int typeId, EventBinding* self)
         {
-            if (!eventManager) return;
+            if (!self || !self->eventManager_) return;
             if (!callbackRef) return;
 
             // Получаем информацию о типе переданного аргумента
@@ -74,10 +72,14 @@ namespace AngelEngine
             // Проверяем, что переданный объект является funcdef (делегатом функции)
             if (type && (type->GetFlags() & asOBJ_FUNCDEF))
             {
-                // Безопасный каст, так как funcdef в AS представлен как asIScriptFunction*
-                asIScriptFunction* func = static_cast<asIScriptFunction*>(callbackRef);
+                // Безопасный каст. Для ?&in и funcdef, callbackRef является указателем на asIScriptFunction* (то есть asIScriptFunction**)
+                // Мы должны разыменовать его, чтобы получить сам указатель на функцию.
+                asIScriptFunction* func = *static_cast<asIScriptFunction**>(callbackRef);
                 
-                eventManager->Subscribe(eastl::string(eventName.c_str()), func);
+                if (func)
+                {
+                    self->eventManager_->Subscribe(eastl::string(eventName.c_str()), func);
+                }
             }
             else
             {

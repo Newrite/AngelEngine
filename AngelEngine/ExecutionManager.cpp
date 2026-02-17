@@ -7,6 +7,7 @@ module;
 #include <angelscript.h>
 #include <contextmgr.h>
 
+#include <EASTL/atomic.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/expected.h>
 #include <EASTL/chrono.h>
@@ -37,6 +38,9 @@ namespace AngelEngine
         
         ~ExecutionManager()
         {
+            // Destroy ContextMgr first so it returns all active contexts to the pool
+            contextMgr_.reset();
+
             // Clean up pooled contexts
             for (auto* ctx : contextPool_)
             {
@@ -61,7 +65,7 @@ namespace AngelEngine
         void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) override
         {
             // Update frame start time for Watchdog
-            frameStartTime_ = eastl::chrono::steady_clock::now();
+            frameStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
             
             // 1. Retrieve deferred events
             if (eventManager)
@@ -125,7 +129,7 @@ namespace AngelEngine
 
         asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) override
         {
-            // std::scoped_lock lock(mutex_);
+            std::scoped_lock lock(mutex_);
             asIScriptContext* ctx = nullptr;
 
             if (!contextPool_.empty())
@@ -149,7 +153,7 @@ namespace AngelEngine
 
         void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) override
         {
-            // std::scoped_lock lock(mutex_);
+            std::scoped_lock lock(mutex_);
             if (ctx)
             {
                 ctx->Unprepare();
@@ -158,27 +162,34 @@ namespace AngelEngine
         }
 
     private:
-        static asUINT GetSystemTimeMs()
+        static int64_t GetSystemTimeMs()
         {
-            using namespace std::chrono;
+            using namespace eastl::chrono;
             auto now = steady_clock::now();
             auto ms = duration_cast<milliseconds>(now.time_since_epoch()).count();
-            return static_cast<asUINT>(ms);
+            return static_cast<int64_t>(ms);
+        }
+
+        static asUINT GetSystemTimeAsUInt()
+        {
+            return static_cast<asUINT>(GetSystemTimeMs());
         }
 
         // --- Watchdog (LineCallback) ---
         static void LineCallback(asIScriptContext* ctx, void* param)
         {
+            ExecutionManager* self = static_cast<ExecutionManager*>(param);
+
             // Optimization: Only check time every 1000 instructions
-            static int instructionCounter = 0;
+            // Use thread_local to avoid race conditions and false sharing
+            thread_local int instructionCounter = 0;
             if (++instructionCounter < 1000) return;
             instructionCounter = 0;
 
-            ExecutionManager* self = static_cast<ExecutionManager*>(param);
-
             // Check how much time has passed since the start of the frame (Tick)
-            auto now = eastl::chrono::steady_clock::now();
-            auto duration = eastl::chrono::duration_cast<eastl::chrono::milliseconds>(now - self->frameStartTime_).count();
+            auto now = GetSystemTimeMs();
+            auto start = self->frameStartTimeMs_.load(eastl::memory_order_relaxed);
+            auto duration = now - start;
             // std::println("Now - {} FrameStart - {} Duration - {}", now.time_since_epoch().count(), self->frameStartTime_.time_since_epoch().count(), duration);
 
             if (duration > MAX_SCRIPT_EXEC_TIME_MS)
@@ -256,17 +267,17 @@ namespace AngelEngine
         void Init()
         {
             contextMgr_ = eastl::make_unique<CContextMgr>();
-            contextMgr_->SetGetTimeCallback(GetSystemTimeMs);
-            frameStartTime_ = eastl::chrono::steady_clock::now();
+            contextMgr_->SetGetTimeCallback(GetSystemTimeAsUInt);
+            frameStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
         }
 
         ContextManagerPtr contextMgr_;
-        std::mutex mutex_{};
+        std::recursive_mutex mutex_{};
         
         // Context Pool
         eastl::vector<asIScriptContext*> contextPool_;
         
         // Frame start time (for Watchdog)
-        eastl::chrono::steady_clock::time_point frameStartTime_;
+        eastl::atomic<int64_t> frameStartTimeMs_;
     };
 }

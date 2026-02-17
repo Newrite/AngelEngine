@@ -35,7 +35,7 @@ namespace AngelEngine
         }
     };
 
-    export class ScriptEngine final : public IScriptEngine
+    export class ScriptEngine final : public IScriptEngine, public IScriptEngineGetters
     {
     public:
         using AsEnginePtr = eastl::unique_ptr<asIScriptEngine, AngelScriptDeleter>;
@@ -53,12 +53,16 @@ namespace AngelEngine
 
             AsEnginePtr engine(rawEngine);
             
-            return eastl::unique_ptr<ScriptEngine>(new ScriptEngine(
+            auto scriptEngine = eastl::unique_ptr<ScriptEngine>(new ScriptEngine(
                 eastl::move(engine), 
                 eastl::move(factory),
                 useJit,
                 useAutoGC
             ));
+            
+            scriptEngine->InitializeEngine();
+            
+            return scriptEngine;
         }
 
         void AddListener(IEngineListener* listener) override
@@ -91,6 +95,10 @@ namespace AngelEngine
         void Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
+            eventManager_->DispatchDeferred("OnTick", [&](asIScriptContext* ctx)
+            {
+                ctx->SetArgFloat(0, deltaTime);
+            });
             executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
         }
 
@@ -150,6 +158,7 @@ namespace AngelEngine
         const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const override { return executionManager_; }
         const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const override { return moduleLoader_; }
         const eastl::unique_ptr<IStateSerializer>& GetStateSerializer() const override { return stateSerializer_; }
+        asIScriptEngine* GetEngine() const override { return engine_.get(); }
         
         void InitializeEngine()
         {
@@ -255,6 +264,15 @@ namespace AngelEngine
             }
 
             auto result = bindingManager_->BindAll(engine_.get());
+            if (!result.has_value())
+            {
+                // TODO: Broadcast error
+            }
+        }
+        
+        void Bind(IScriptBinding* binding)
+        {
+            auto result = bindingManager_->Bind(engine_.get(), binding);
             if (!result.has_value())
             {
                 // TODO: Broadcast error
