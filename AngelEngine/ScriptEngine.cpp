@@ -21,6 +21,7 @@ import AngelEngine.ExecutionManager;
 import AngelEngine.ReloadManager;
 import AngelEngine.SaveLoadManager;
 import AngelEngine.Interfaces;
+import AngelEngine.EventsBinding;
 
 namespace fs = std::filesystem;
 
@@ -92,7 +93,7 @@ namespace AngelEngine
         void Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
-            eventManager_->DispatchDeferred("OnTick", [&](asIScriptContext* ctx)
+            eventManager_->DispatchDeferred(EventsName::OnTick, [&](asIScriptContext* ctx)
             {
                 ctx->SetArgFloat(0, deltaTime);
             });

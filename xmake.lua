@@ -178,7 +178,7 @@ target("AngelEngine")
 target("AngelScriptPlayground")
     set_kind("binary")
 
-    add_files("src/main.cpp")
+    add_files("src/**.cpp")
     add_headerfiles("src/TestContext.hpp")
     add_deps("AngelEngine")
 

@@ -23,73 +23,10 @@ module;
 export module AngelEngine.BindingManager;
 
 import AngelEngine.Interfaces;
+import AngelEngine.EventsBinding;
 
 namespace AngelEngine
 {
-    
-    export class EventBinding final : public IScriptBinding
-    {
-    public:
-        explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager)
-        {
-        }
-
-        void Bind(asIScriptEngine* engine) override
-        {
-            // Регистрируем глобальную функцию подписки. 
-            // Она принимает строку (название эвента) и ЛЮБУЮ функцию (asIScriptFunction@).
-            
-            // Используем asCALL_CDECL_OBJLAST, чтобы передать 'this' (EventBinding*) как последний параметр.
-            // Это позволяет избежать использования глобальной статической переменной.
-            
-            int r = engine->RegisterGlobalFunction(
-                            "void Subscribe(const string &in eventName, ?&in callback)",
-                            asFUNCTION(ProxySubscribe),
-                            asCALL_CDECL_OBJLAST,
-                            this
-                        );
-
-            if (r < 0)
-            {
-                std::println(stderr, "[EventBinding] Failed to register Subscribe function. Code: {}", r);
-            }
-        }
-
-    private:
-        // [FIX] Исправлена сигнатура C++ функции для соответствия asCALL_CDECL_OBJLAST и типам AS
-        static void ProxySubscribe(const eastl::string& eventName, void* callbackRef, int typeId, EventBinding* self)
-        {
-            if (!self || !self->eventManager_) return;
-            if (!callbackRef) return;
-
-            // Получаем информацию о типе переданного аргумента
-            asIScriptContext* ctx = asGetActiveContext();
-            if (!ctx) return;
-            
-            asIScriptEngine* engine = ctx->GetEngine();
-            asITypeInfo* type = engine->GetTypeInfoById(typeId);
-
-            // Проверяем, что переданный объект является funcdef (делегатом функции)
-            if (type && (type->GetFlags() & asOBJ_FUNCDEF))
-            {
-                // Безопасный каст. Для ?&in и funcdef, callbackRef является указателем на asIScriptFunction* (то есть asIScriptFunction**)
-                // Мы должны разыменовать его, чтобы получить сам указатель на функцию.
-                asIScriptFunction* func = *static_cast<asIScriptFunction**>(callbackRef);
-                
-                if (func)
-                {
-                    self->eventManager_->Subscribe(eastl::string(eventName.c_str()), func);
-                }
-            }
-            else
-            {
-                std::println(stderr, "[ScriptEngine] Error: Subscribe called with invalid type for event '{}'. Expected a function handle.", eventName);
-            }
-        }
-        
-        IEventManager* eventManager_;
-    };
-
     export class BindingManager final : public IBindingManager
     {
     public:

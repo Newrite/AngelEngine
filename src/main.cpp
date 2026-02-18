@@ -15,6 +15,7 @@
 import AngelEngine.Interfaces;
 import AngelEngine.ScriptEngine;
 import AngelEngine.Infrastructure;
+import AngelEngineTest.EventsBinding;
 
 namespace fs = std::filesystem;
 using namespace AngelEngine;
@@ -53,7 +54,7 @@ void SetupEnvironment() {
                 }
                 print("Main executed. Counter: " + globalCounter);
                 
-                Subscribe("OnTick", @OnTick);
+                SubscribeTick(@OnTick);
             }
 
             void OnTick(float dt) {
@@ -70,6 +71,7 @@ void SetupEnvironment() {
     {
         std::ofstream file("angelscripts/mods/EventTest/main.as");
         file << R"(
+
             void main() {}
 
             void OnTestEvent(int val, float f) { 
@@ -81,8 +83,8 @@ void SetupEnvironment() {
             }
 
             void SubscribeToEvents() { 
-                Subscribe("CustomEvent", @OnTestEvent); 
-                Subscribe("DeferredEvent", @OnDeferredEvent); 
+                SubscribeCustomEvent(@OnTestEvent); 
+                SubscribeDeferredEvent(@OnDeferredEvent); 
             }
         )";
     }
@@ -167,8 +169,10 @@ int main() {
 
     // Bindings
     auto testBinding = eastl::make_unique<TestBinding>();
+    auto eventsBinding = eastl::make_unique<AngelEngineTest::TestEventBinding>(engine->GetEventManager());
     // Manually bind because MakeEngine already called BindAll
     engine->AddBinding(testBinding.get());
+    engine->AddBinding(eventsBinding.get());
     
     engine->InitializeEngine();
 
