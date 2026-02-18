@@ -2,10 +2,7 @@
 
 #include <angelscript.h>
 #include <print>
-#include <cstdlib>
 #include <map>
-#include <string>
-#include <vector>
 
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
@@ -136,7 +133,7 @@ private:
 class TestBinding final : public AngelEngine::IScriptBinding
 {
 public:
-    eastl::vector<std::string> capturedOutput;
+    eastl::vector<eastl::string> capturedOutput;
 
     void Bind(asIScriptEngine* engine) override
     {
@@ -171,12 +168,12 @@ public:
         return nullptr;
     }
 
-    static void PrintCallback(const std::string& msg, TestBinding* self)
+    static void PrintCallback(const eastl::string& msg, TestBinding* self)
     {
         if (self)
         {
             self->capturedOutput.push_back(msg);
-            std::println("[Script] {}", msg);
+            std::println("[Script] {}", msg.c_str());
         }
     }
 };

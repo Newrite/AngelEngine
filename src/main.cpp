@@ -1,7 +1,6 @@
 #include <filesystem>
 #include <fstream>
 #include <print>
-#include <vector>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -177,7 +176,7 @@ int main() {
     MockActor actor100(100, 50);
 
     // Register Handler
-    auto& saveLoadManager = engine->GetSaveLoadManager();
+    auto saveLoadManager = engine->GetSaveLoadManager();
     auto handler = eastl::make_unique<MockActorHandler>(engine->GetEngine());
     saveLoadManager->AddHandler(handler.get());
 
@@ -191,16 +190,23 @@ int main() {
     }
 
     // Run
-    std::println("Running mods...");
-    auto runRes = engine->RunAllMods();
+    // std::println("Running mods...");
+    // auto runRes = engine->RunAllMods();
+    // if (!runRes.has_value())
+    // {
+    //     std::println(stderr, "Run failed. Check logs.");
+    //     std::exit(1);
+    // }
+
+    // Phase 1: Execution & Modification
+    std::println("Phase 1: Execution & Modification");
+    
+    auto runRes = engine->RunMod("TestMod");
     if (!runRes.has_value())
     {
         std::println(stderr, "Run failed. Check logs.");
         std::exit(1);
     }
-
-    // Phase 1: Execution & Modification
-    std::println("Phase 1: Execution & Modification");
     
     // IMPORTANT: RunAllMods only schedules main(). We must Tick() to execute it.
     engine->Tick(1.0f/60.0f);
@@ -241,7 +247,7 @@ int main() {
     // Phase 2: Saving
     std::println("Phase 2: Saving");
     eastl::vector<uint8_t> saveBlob;
-    bool saveRes = saveLoadManager->GetSaveData(engine->GetEngine(), engine->GetModuleLoader().get(), saveBlob);
+    bool saveRes = saveLoadManager->GetSaveData(engine->GetEngine(), engine->GetModuleLoader(), saveBlob);
     TEST_ASSERT(saveRes, "Save failed");
     TEST_ASSERT(!saveBlob.empty(), "Save blob is empty");
     std::println("Saved {} bytes.", saveBlob.size());
@@ -307,6 +313,13 @@ int main() {
     // Phase 6: Event System Test
     std::println("Phase 6: Event System Test");
     
+    runRes = engine->RunMod("EventTest");
+    if (!runRes.has_value())
+    {
+        std::println(stderr, "Run failed. Check logs.");
+        std::exit(1);
+    }
+    
     asIScriptModule* eventMod = engine->GetEngine()->GetModule("EventTest");
     TEST_ASSERT(eventMod != nullptr, "Module EventTest not found");
 
@@ -318,6 +331,7 @@ int main() {
     asIScriptContext* ctx = engine->GetEngine()->CreateContext();
     ctx->Prepare(subFunc);
     int r = ctx->Execute();
+    
     TEST_ASSERT(r == asEXECUTION_FINISHED, "SubscribeToEvents execution failed");
     ctx->Release();
 
@@ -336,7 +350,7 @@ int main() {
     // Verify Output
     bool foundEvent = false;
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Event received: 123, 3.14") != std::string::npos) {
+        if (line.find("Event received: 123, 3.14") != eastl::string::npos) {
             foundEvent = true;
             break;
         }
@@ -351,7 +365,7 @@ int main() {
     // Verify it didn't execute yet
     bool foundDeferred = false;
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Deferred Executed") != std::string::npos) {
+        if (line.find("Deferred Executed") != eastl::string::npos) {
             foundDeferred = true;
             break;
         }
@@ -363,7 +377,7 @@ int main() {
 
     // Verify it executed now
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Deferred Executed") != std::string::npos) {
+        if (line.find("Deferred Executed") != eastl::string::npos) {
             foundDeferred = true;
             break;
         }
@@ -372,6 +386,13 @@ int main() {
 
     // Phase 7: Watchdog Test
     std::println("Phase 7: Watchdog Test");
+    
+    runRes = engine->RunMod("LoopTest");
+    if (!runRes.has_value())
+    {
+        std::println(stderr, "Run failed. Check logs.");
+        std::exit(1);
+    }
     
     asIScriptModule* loopMod = engine->GetEngine()->GetModule("LoopTest");
     TEST_ASSERT(loopMod != nullptr, "Module LoopTest not found");
@@ -387,7 +408,7 @@ int main() {
     loopCtx->Prepare(loopMain);
     
     std::println("Executing infinite loop script...");
-    r = loopCtx->Execute();
+    r = engine->GetExecutionManager()->ExecuteManaged(loopCtx);
     
     std::println("Loop execution result: {}", r);
     TEST_ASSERT(r == asEXECUTION_ABORTED, "Infinite loop was not aborted by watchdog");
@@ -398,6 +419,13 @@ int main() {
     // Phase 8: Standard Addons Test
     std::println("Phase 8: Standard Addons Test");
     testBinding->capturedOutput.clear();
+    
+    runRes = engine->RunMod("AddonTest");
+    if (!runRes.has_value())
+    {
+        std::println(stderr, "Run failed. Check logs.");
+        std::exit(1);
+    }
     
     asIScriptModule* addonMod = engine->GetEngine()->GetModule("AddonTest");
     TEST_ASSERT(addonMod != nullptr, "Module AddonTest not found");
@@ -415,8 +443,8 @@ int main() {
     bool foundArray = false;
     bool foundDict = false;
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Array size: 3") != std::string::npos) foundArray = true;
-        if (line.find("Dict value: 42") != std::string::npos) foundDict = true;
+        if (line.find("Array size: 3") != eastl::string::npos) foundArray = true;
+        if (line.find("Dict value: 42") != eastl::string::npos) foundDict = true;
     }
     TEST_ASSERT(foundArray, "Array test failed");
     TEST_ASSERT(foundDict, "Dictionary test failed");
@@ -446,9 +474,6 @@ int main() {
     // It starts the contexts.
     // Then we call `Tick`.
     
-    // Let's clear output first.
-    testBinding->capturedOutput.clear();
-    
     // We only care about CoroutineTest output.
     // "Routine Start" -> sleep -> "Routine End"
     
@@ -473,8 +498,13 @@ int main() {
     // `TestMod` is fine.
     
     // Let's use `RunAllMods`.
-    std::println("Starting Coroutine Test via RunAllMods...");
-    engine->RunAllMods(); 
+    
+    runRes = engine->RunMod("CoroutineTest");
+    if (!runRes.has_value())
+    {
+        std::println(stderr, "Run failed. Check logs.");
+        std::exit(1);
+    }
     
     // Step 1: Tick(0.0f) - Should execute "Routine Start" and then sleep.
     engine->Tick(0.0f);
@@ -483,8 +513,8 @@ int main() {
     bool routineEnd = false;
     
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Routine Start") != std::string::npos) routineStart = true;
-        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+        if (line.find("Routine Start") != eastl::string::npos) routineStart = true;
+        if (line.find("Routine End") != eastl::string::npos) routineEnd = true;
     }
     
     TEST_ASSERT(routineStart, "Coroutine should have started");
@@ -506,23 +536,32 @@ int main() {
     
     routineEnd = false;
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+        if (line.find("Routine End") != eastl::string::npos) routineEnd = true;
     }
     TEST_ASSERT(!routineEnd, "Coroutine should still be sleeping (100ms < 200ms)");
     
-    // Step 3: Simulate waiting 150ms more (total > 200ms).
-    std::println("Sleeping 150ms...");
-    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    // Step 3: Simulate waiting enough time to pass the 1500ms mark.
+    // RunAllMods ate ~1000ms. Step 2 ate 100ms. We are at ~1100ms.
+    // We need to wait at least 400ms more. Let's wait 500ms to be safe.
+    std::println("Sleeping 500ms...");
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
     engine->Tick(0.0f);
-    
+
     routineEnd = false;
     for (const auto& line : testBinding->capturedOutput) {
-        if (line.find("Routine End") != std::string::npos) routineEnd = true;
+        if (line.find("Routine End") != eastl::string::npos) routineEnd = true;
     }
     TEST_ASSERT(routineEnd, "Coroutine should have ended");
 
     // Phase 10: Exception Test
     std::println("Phase 10: Exception Test");
+    
+    runRes = engine->RunMod("ExceptionTest");
+    if (!runRes.has_value())
+    {
+        std::println(stderr, "Run failed. Check logs.");
+        std::exit(1);
+    }
     
     asIScriptModule* exceptMod = engine->GetEngine()->GetModule("ExceptionTest");
     TEST_ASSERT(exceptMod != nullptr, "Module ExceptionTest not found");
@@ -556,9 +595,9 @@ int main() {
     std::println("Exception execution result: {}", r);
     TEST_ASSERT(r == asEXECUTION_EXCEPTION, "Script should have thrown an exception");
     
-    std::string exceptionStr = exceptCtx->GetExceptionString();
+    eastl::string exceptionStr = exceptCtx->GetExceptionString();
     std::println("Exception string: {}", exceptionStr);
-    TEST_ASSERT(exceptionStr.find("Divide by zero") != std::string::npos, "Exception should be 'Divide by zero'");
+    TEST_ASSERT(exceptionStr.find("Divide by zero") != eastl::string::npos, "Exception should be 'Divide by zero'");
     
     engine->GetExecutionManager()->ReturnContext(engine->GetEngine(), exceptCtx, nullptr);
     

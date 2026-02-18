@@ -147,10 +147,16 @@ target("AngelEngine")
     add_defines("AS_PROCESS_METADATA=1")
     -- add_defines("EASTL_USER_DEFINED_ALLOCATOR=0")
 
-    add_files("AngelEngine/**.cpp", {public = true})
+    add_files("AngelEngine/*.cpp", {public = true})
+    -- Точечно глушим варнинг для всего аддона строк (чтобы не вылезло в других файлах аддона)
+    add_files("AngelEngine/Addons/**.cpp", {
+        cxflags = "-Wno-unused-but-set-variable"
+    })
+    add_headerfiles("AngelEngine/**.h", {public = true})
 
     -- Подключаем asbind20 (header-only библиотека, но указываем include)
     add_includedirs("asbind20/include")
+    add_includedirs("AngelEngine/Addons")
 
     add_deps("angelscript_lib")
     add_deps("as_jit")

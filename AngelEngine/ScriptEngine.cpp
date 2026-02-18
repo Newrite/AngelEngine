@@ -112,6 +112,20 @@ namespace AngelEngine
 
             return {};
         }
+        
+        eastl::expected<void, EngineError> RunMod(const eastl::string& modName) override
+        {
+            std::scoped_lock lock(mutex_);
+
+            auto resultRunMod = executionManager_->RunMod(engine_.get(), modName);
+            if (!resultRunMod.has_value())
+            {
+                // TODO: Broadcast error via listener
+                return eastl::unexpected(EngineError::FailRunMods);
+            }
+
+            return {};
+        }
 
         eastl::expected<void, EngineError> CompileAllMods() override
         {
@@ -150,12 +164,12 @@ namespace AngelEngine
             BroadcastAddBinding(binding);
         }
 
-        const eastl::unique_ptr<IEventManager>& GetEventManager() const override { return eventManager_; }
-        const eastl::unique_ptr<IBindingManager>& GetBindingManager() const override { return bindingManager_; }
-        const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const override { return executionManager_; }
-        const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const override { return moduleLoader_; }
-        const eastl::unique_ptr<IReloadManager>& GetReloadManager() const override { return reloadManager_; }
-        const eastl::unique_ptr<ISaveLoadManager>& GetSaveLoadManager() const override { return saveLoadManager_; }
+        IEventManager* GetEventManager() const override { return eventManager_.get(); }
+        IBindingManager* GetBindingManager() const override { return bindingManager_.get(); }
+        IExecutionManager* GetExecutionManager() const override { return executionManager_.get(); }
+        IModuleLoader* GetModuleLoader() const override { return moduleLoader_.get(); }
+        IReloadManager* GetReloadManager() const override { return reloadManager_.get(); }
+        ISaveLoadManager* GetSaveLoadManager() const override { return saveLoadManager_.get(); }
         asIScriptEngine* GetEngine() const override { return engine_.get(); }
         
         void InitializeEngine()

@@ -10,9 +10,9 @@ module;
 #include <print>
 #include <string>
 
-#include <scriptstdstring.h>
+#include <scripteastlstring/scripteastlstring.h>
 #include <scriptarray.h>
-#include <scriptdictionary.h>
+#include <scriptedictionary/scriptdictionary.h>
 #include <scriptmath.h>
 #include <scriptfile.h>
 #include <scriptany.h>
@@ -57,7 +57,7 @@ namespace AngelEngine
 
     private:
         // [FIX] Исправлена сигнатура C++ функции для соответствия asCALL_CDECL_OBJLAST и типам AS
-        static void ProxySubscribe(const std::string& eventName, void* callbackRef, int typeId, EventBinding* self)
+        static void ProxySubscribe(const eastl::string& eventName, void* callbackRef, int typeId, EventBinding* self)
         {
             if (!self || !self->eventManager_) return;
             if (!callbackRef) return;
@@ -95,7 +95,7 @@ namespace AngelEngine
     public:
         void RegisterStandardAddons(asIScriptEngine* engine) override
         {
-            RegisterStdString(engine);
+            RegisterEASTLString(engine);
             RegisterScriptArray(engine, true);
             RegisterScriptDictionary(engine);
             RegisterScriptMath(engine);
@@ -104,7 +104,7 @@ namespace AngelEngine
             RegisterScriptDateTime(engine);
             RegisterScriptHandle(engine);
             RegisterScriptWeakRef(engine);
-            RegisterStdStringUtils(engine);
+            RegisterEASTLStringUtils(engine);
         }
         
         eastl::expected<void, BindingError> BindAll(asIScriptEngine* const engine) override

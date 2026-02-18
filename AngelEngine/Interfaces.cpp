@@ -28,7 +28,9 @@ namespace AngelEngine
     export enum class ExecutionError : std::uint8_t
     {
         NoModsLoadedToRun,
-        FailCreateContext
+        FailCreateContext,
+        ModWithoutMain,
+        FailRunMod
     };
 
     export enum class BindingError : std::uint8_t
@@ -121,19 +123,24 @@ namespace AngelEngine
         };
         virtual eastl::vector<QueuedEvent> PopDeferredEvents() = 0;
     };
+    
+    export struct IContextPooling
+    {
+        virtual ~IContextPooling() = default;
+        virtual asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) = 0;
+        virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) = 0;
+    };
 
-    export struct IExecutionManager
+    export struct IExecutionManager : IContextPooling
     {
         virtual ~IExecutionManager() = default;
         virtual void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) = 0;
         virtual void AbortAll() const = 0;
         virtual void Renew() = 0;
         virtual void RegisterThreadSupport(asIScriptEngine* engine) = 0;
+        virtual int ExecuteManaged(asIScriptContext* ctx) = 0;
         virtual eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine, const IModuleLoader* moduleLoader) = 0;
-        
-        // Context Pooling Callbacks
-        virtual asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) = 0;
-        virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) = 0;
+        virtual eastl::expected<void, ExecutionError> RunMod(asIScriptEngine* engine, const eastl::string& modName) = 0;
     };
 
     export struct IReloadManager
@@ -196,12 +203,12 @@ namespace AngelEngine
     {
         virtual ~IScriptEngineGetters() = default;
         virtual asIScriptEngine* GetEngine() const = 0;
-        virtual const eastl::unique_ptr<IEventManager>& GetEventManager() const = 0;
-        virtual const eastl::unique_ptr<IBindingManager>& GetBindingManager() const = 0;
-        virtual const eastl::unique_ptr<IExecutionManager>& GetExecutionManager() const = 0;
-        virtual const eastl::unique_ptr<IModuleLoader>& GetModuleLoader() const = 0;
-        virtual const eastl::unique_ptr<IReloadManager>& GetReloadManager() const = 0;
-        virtual const eastl::unique_ptr<ISaveLoadManager>& GetSaveLoadManager() const = 0;
+        virtual IEventManager* GetEventManager() const = 0;
+        virtual IBindingManager* GetBindingManager() const = 0;
+        virtual IExecutionManager* GetExecutionManager() const = 0;
+        virtual IModuleLoader* GetModuleLoader() const = 0;
+        virtual IReloadManager* GetReloadManager() const = 0;
+        virtual ISaveLoadManager* GetSaveLoadManager() const = 0;
     };
 
     export struct IScriptEngine
@@ -209,6 +216,7 @@ namespace AngelEngine
         virtual ~IScriptEngine() = default;
         virtual void Tick(float deltaTime) = 0;
         virtual eastl::expected<void, EngineError> RunAllMods() = 0;
+        virtual eastl::expected<void, EngineError> RunMod(const eastl::string& modName) = 0;
         virtual eastl::expected<void, EngineError> CompileAllMods() = 0;
         virtual eastl::expected<void, EngineError> HotReload() const = 0;
         virtual void AddBinding(IScriptBinding* binding) const = 0;

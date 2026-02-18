@@ -24,13 +24,14 @@ namespace AngelEngine
             executionManager->AbortAll();
             eventManager->ClearAll();
 
+            executionManager->Renew();
+            
             auto compileResult = moduleLoader->CompileAllMods(engine);
             if (!compileResult.has_value())
             {
                 return compileResult;
             }
 
-            executionManager->Renew();
 
             auto runResult = executionManager->RunAllMods(engine, moduleLoader);
             if (!runResult.has_value())

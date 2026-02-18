@@ -3,6 +3,9 @@ module;
 #include <filesystem>
 #include <mutex>
 #include <print>
+#include <thread>
+#include <condition_variable>
+#include <chrono>
 
 #include <angelscript.h>
 #include <contextmgr.h>
@@ -12,6 +15,7 @@ module;
 #include <EASTL/expected.h>
 #include <EASTL/chrono.h>
 #include <EASTL/vector.h>
+#include <EASTL/string.h>
 
 export module AngelEngine.ExecutionManager;
 
@@ -38,6 +42,16 @@ namespace AngelEngine
         
         ~ExecutionManager()
         {
+            {
+                std::lock_guard lock(cvMutex_);
+                threadStop_.store(true, eastl::memory_order_relaxed);
+            }
+            cv_.notify_all();
+            if (watchdogThread_.joinable())
+            {
+                watchdogThread_.join();
+            }
+
             // Destroy ContextMgr first so it returns all active contexts to the pool
             contextMgr_.reset();
 
@@ -59,14 +73,38 @@ namespace AngelEngine
 
         void Renew() override
         {
+            {
+                std::lock_guard lock(cvMutex_);
+                threadStop_.store(true, eastl::memory_order_relaxed);
+            }
+            cv_.notify_all();
+
+            if (watchdogThread_.joinable())
+            {
+                watchdogThread_.join();
+            }
+            
+            // 1. СНАЧАЛА убиваем менеджер контекстов! 
+            // Он вернет все активные контексты, вызвав ReturnContext, и они попадут в contextPool_
+            contextMgr_.reset();
+
+            // ОЧИСТКА ПУЛА (Добавь этот блок!)
+            for (auto* ctx : contextPool_)
+            {
+                if (ctx) ctx->Release();
+            }
+            contextPool_.clear();
+
+            threadStop_.store(false, eastl::memory_order_relaxed);
+            abortRequested_.store(false, eastl::memory_order_relaxed);
+            executionDepth_.store(0, eastl::memory_order_relaxed);
+            executionStartTimeMs_.store(0, eastl::memory_order_relaxed);
+
             Init();
         }
 
         void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) override
         {
-            // Update frame start time for Watchdog
-            frameStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
-            
             // 1. Retrieve deferred events
             if (eventManager)
             {
@@ -88,16 +126,13 @@ namespace AngelEngine
                 }
             }
 
-            contextMgr_->ExecuteScripts();
+           this->AtomicExecutionHelper();
         }
 
         eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
-                                                       const IModuleLoader* moduleLoader) override
+                                                               const IModuleLoader* moduleLoader) override
         {
             std::scoped_lock lock(mutex_);
-
-            // Ensure we don't have leftover contexts from previous runs
-            // contextMgr_->AbortAll(); // Optional: depends on if RunAllMods is additive or a reset
 
             if (moduleLoader->Empty())
             {
@@ -107,14 +142,32 @@ namespace AngelEngine
 
             for (const auto& modName : moduleLoader->GetLoadedModules())
             {
-                auto resultStartModContext = StartModContext(engine, modName.c_str());
-                if (!resultStartModContext.has_value())
-                {
-                    std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
-                }
+                this->StartContextHelper(engine, modName.c_str());
             }
             
-            contextMgr_->ExecuteScripts();
+            this->AtomicExecutionHelper();
+
+            return {};
+        }
+        
+        eastl::expected<void, ExecutionError> RunMod(asIScriptEngine* engine,
+                                                               const eastl::string& modName) override
+        {
+            std::scoped_lock lock(mutex_);
+
+            if (modName.empty())
+            {
+                std::println("[ScriptEngine] No mod load to run.");
+                return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
+            }
+            
+            auto resultStartModContext = this->StartContextHelper(engine, modName.c_str());
+            if (!resultStartModContext.has_value())
+            {
+                return resultStartModContext;
+            }
+            
+            this->AtomicExecutionHelper();
 
             return {};
         }
@@ -162,6 +215,24 @@ namespace AngelEngine
                 contextPool_.push_back(ctx);
             }
         }
+        
+        int ExecuteManaged(asIScriptContext* ctx) override
+        {
+            if (!ctx) return asEXECUTION_ERROR;
+
+            // Увеличиваем глубину. Если это первый (самый внешний) вызов, взводим таймер.
+            if (executionDepth_.fetch_add(1, eastl::memory_order_acquire) == 0)
+            {
+                abortRequested_.store(false, eastl::memory_order_relaxed);
+                executionStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
+            }
+
+            int r = ctx->Execute();
+
+            // Уменьшаем глубину выполнения
+            executionDepth_.fetch_sub(1, eastl::memory_order_release);
+            return r;
+        }
 
     private:
         static int64_t GetSystemTimeMs()
@@ -182,30 +253,32 @@ namespace AngelEngine
         {
             ExecutionManager* self = static_cast<ExecutionManager*>(param);
 
-            // Optimization: Only check time every 1000 instructions
-            // Use thread_local to avoid race conditions and false sharing
-            thread_local int instructionCounter = 0;
-            if (++instructionCounter < 1000) return;
-            instructionCounter = 0;
-
-            // Check how much time has passed since the start of the frame (Tick)
-            auto now = GetSystemTimeMs();
-            auto start = self->frameStartTimeMs_.load(eastl::memory_order_relaxed);
-            auto duration = now - start;
-            // std::println("Now - {} FrameStart - {} Duration - {}", now.time_since_epoch().count(), self->frameStartTime_.time_since_epoch().count(), duration);
-
-            if (duration > MAX_SCRIPT_EXEC_TIME_MS)
+            if (self->abortRequested_.load(eastl::memory_order_relaxed))
             {
-                std::println(stderr, "[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
-                             MAX_SCRIPT_EXEC_TIME_MS);
+                // 1. Сразу сбрасываем флаг в любом случае
+                self->abortRequested_.store(false, eastl::memory_order_relaxed);
                 
-                // Add useful context information before aborting
-                const char* section = "";
-                int line = ctx->GetLineNumber(0, 0, &section);
-                auto* func = ctx->GetFunction(0);
-                std::println(stderr, "           At: {} ({}:{})", func ? func->GetDeclaration() : "null", section, line);
+                // 2. ДОП. ПРОВЕРКА: Действительно ли этот конкретный скрипт превысил лимит?
+                // (Защита от "шальной пули" из-за Race Condition)
+                auto elapsed = GetSystemTimeMs() - self->executionStartTimeMs_.load(eastl::memory_order_relaxed);
+                
+                if (elapsed > MAX_SCRIPT_EXEC_TIME_MS)
+                {
+                    // Сбрасываем таймер для следующих скриптов в очереди
+                    self->executionStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
 
-                ctx->Abort();
+                    std::println(stderr, "[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
+                                 MAX_SCRIPT_EXEC_TIME_MS);
+                    
+                    const char* section = "";
+                    int line = ctx->GetLineNumber(0, 0, &section);
+                    auto* func = ctx->GetFunction(0);
+                    std::println(stderr, "           At: {} ({}:{})", func ? func->GetDeclaration() : "null", section, line);
+
+                    ctx->Abort();
+                }
+                // Если elapsed <= MAX, значит это была "шальная пуля". 
+                // Мы просто съели сигнал и продолжаем нормальную работу скрипта Б.
             }
         }
 
@@ -243,13 +316,13 @@ namespace AngelEngine
         }
 
         eastl::expected<void, ExecutionError> StartModContext(asIScriptEngine* engine,
-                                                            const std::string& modName)
+                                                            const eastl::string& modName)
         {
             asIScriptModule* mod = engine->GetModule(modName.c_str());
-            if (!mod) return {};
+            if (!mod) return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
 
             asIScriptFunction* func = mod->GetFunctionByDecl("void main()");
-            if (!func) return {}; // Mod without main is normal (library)
+            if (!func) return eastl::unexpected(ExecutionError::ModWithoutMain); // Mod without main is normal (library)
 
             // Use AddContext from CContextMgr
             asIScriptContext* ctx = contextMgr_->AddContext(engine, func);
@@ -265,21 +338,79 @@ namespace AngelEngine
             std::println(stderr, "[ScriptEngine] Failed to create context for {}", modName);
             return eastl::unexpected(ExecutionError::FailCreateContext);
         }
+        
+        inline void AtomicExecutionHelper()
+        {
+            // Если это самый первый вход (глубина 0 -> 1)
+            if (executionDepth_.fetch_add(1, eastl::memory_order_acquire) == 0)
+            {
+                abortRequested_.store(false, eastl::memory_order_relaxed);
+                executionStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
+            }
+
+            // Выполнение всех скриптов в очереди
+            contextMgr_->ExecuteScripts();
+
+            // Выходим из исполнения (глубина уменьшается)
+            executionDepth_.fetch_sub(1, eastl::memory_order_release);
+        }
+        
+        inline eastl::expected<void,ExecutionError> StartContextHelper(asIScriptEngine* engine, const eastl::string& modName)
+        {
+            auto resultStartModContext = StartModContext(engine, modName.c_str());
+            if (!resultStartModContext.has_value())
+            {
+                std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
+                return eastl::unexpected(ExecutionError::FailRunMod);
+            }
+            return {};
+        }
 
         void Init()
         {
             contextMgr_ = eastl::make_unique<CContextMgr>();
             contextMgr_->SetGetTimeCallback(GetSystemTimeAsUInt);
-            frameStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
-        }
+            
+            watchdogThread_ = std::thread([this]() {
+                            while (!threadStop_.load(eastl::memory_order_acquire))
+                            {
+                                // Спим интервалами по 100мс (достаточно точно для лимита в 1000мс).
+                                // Используем CV только для того, чтобы мгновенно прервать сон при выходе.
+                                {
+                                    std::unique_lock lock(cvMutex_);
+                                    cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                                        return threadStop_.load(eastl::memory_order_acquire);
+                                    });
+                                }
 
+                                if (threadStop_.load(eastl::memory_order_acquire)) break;
+
+                                // Если скрипт работает прямо сейчас (глубина > 0)
+                                                                if (executionDepth_.load(eastl::memory_order_acquire) > 0)
+                                                                {
+                                                                    auto elapsed = GetSystemTimeMs() - executionStartTimeMs_.load(eastl::memory_order_relaxed);
+                                                                    if (elapsed > MAX_SCRIPT_EXEC_TIME_MS)
+                                                                    {
+                                                                        abortRequested_.store(true, eastl::memory_order_release);
+                                                                    }
+                                                                }
+                            }
+                        });
+        }
+        
         ContextManagerPtr contextMgr_;
         std::recursive_mutex mutex_{};
         
         // Context Pool
         eastl::vector<asIScriptContext*> contextPool_;
         
-        // Frame start time (for Watchdog)
-        eastl::atomic<int64_t> frameStartTimeMs_;
+        // Watchdog
+        eastl::atomic<int> executionDepth_{0};
+        eastl::atomic<bool> abortRequested_{false};
+        eastl::atomic<bool> threadStop_{false};
+        eastl::atomic<int64_t> executionStartTimeMs_{0};
+        std::thread watchdogThread_;
+        std::condition_variable cv_;
+        std::mutex cvMutex_;
     };
 }
