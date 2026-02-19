@@ -28,82 +28,81 @@ if is_mode("release") then
     add_cxflags("/Ob2", "/Oi", "/Ot")
 end
 
-add_requires("doctest")
 add_requires("eastl")
 
 -------------------------------------------------------------------------------
 -- Target: AngelScript Static Library
 -------------------------------------------------------------------------------
-target("angelscript_lib")
-    set_kind("static")
-    set_warnings("none") -- Отключаем варнинги для чужого кода, чтобы не ломать билд
+target("AngelScript")
+set_kind("static")
+set_warnings("none") -- Отключаем варнинги для чужого кода, чтобы не ломать билд
 
-    local as_root = "GitModules/angelscript/sdk/angelscript"
-    local as_addon = "GitModules/angelscript/sdk/add_on"
+local as_root = "GitModules/angelscript/sdk/angelscript"
+local as_addon = "GitModules/angelscript/sdk/add_on"
 
-    -- Core AngelScript
-    add_files(as_root .. "/source/*.cpp")
-    add_files(as_root .. "/source/as_callfunc_x64_msvc_asm.asm")
-    add_includedirs(as_root .. "/include", {public = true})
+-- Core AngelScript
+add_files(as_root .. "/source/*.cpp")
+add_files(as_root .. "/source/as_callfunc_x64_msvc_asm.asm")
+add_includedirs(as_root .. "/include", { public = true })
 
-    -- 1. Строки (String)
-    add_files(as_addon .. "/scriptstdstring/*.cpp")
-    add_includedirs(as_addon .. "/scriptstdstring", {public = true})
+-- 1. Строки (String)
+add_files(as_addon .. "/scriptstdstring/*.cpp")
+add_includedirs(as_addon .. "/scriptstdstring", { public = true })
 
-    -- 2. Массивы (Array)
-    add_files(as_addon .. "/scriptarray/*.cpp")
-    add_includedirs(as_addon .. "/scriptarray", {public = true})
+-- 2. Массивы (Array)
+add_files(as_addon .. "/scriptarray/*.cpp")
+add_includedirs(as_addon .. "/scriptarray", { public = true })
 
-    -- 3. Словари (Dictionary)
-    add_files(as_addon .. "/scriptdictionary/*.cpp")
-    add_includedirs(as_addon .. "/scriptdictionary", {public = true})
+-- 3. Словари (Dictionary)
+add_files(as_addon .. "/scriptdictionary/*.cpp")
+add_includedirs(as_addon .. "/scriptdictionary", { public = true })
 
-    -- 4. Математика (Math)
-    add_files(as_addon .. "/scriptmath/*.cpp")
-    add_includedirs(as_addon .. "/scriptmath", {public = true})
+-- 4. Математика (Math)
+add_files(as_addon .. "/scriptmath/*.cpp")
+add_includedirs(as_addon .. "/scriptmath", { public = true })
 
-    -- 5. Файловая система (опционально, полезно для тестов)
-    add_files(as_addon .. "/scriptfile/*.cpp")
-    add_includedirs(as_addon .. "/scriptfile", {public = true})
+-- 5. Файловая система (опционально, полезно для тестов)
+add_files(as_addon .. "/scriptfile/*.cpp")
+add_includedirs(as_addon .. "/scriptfile", { public = true })
 
-    -- 6. scriptbuilder
-    add_files(as_addon .. "/scriptbuilder/*.cpp")
-    add_includedirs(as_addon .. "/scriptbuilder", {public = true})
+-- 6. scriptbuilder
+add_files(as_addon .. "/scriptbuilder/*.cpp")
+add_includedirs(as_addon .. "/scriptbuilder", { public = true })
 
-    -- 7. serializer
-    add_files(as_addon ..  "/serializer/*.cpp")
-    add_includedirs(as_addon .. "/serializer", {public = true})
+-- 7. serializer
+add_files(as_addon .. "/serializer/*.cpp")
+add_includedirs(as_addon .. "/serializer", { public = true })
 
-    -- 8. any
-    add_files(as_addon ..  "/scriptany/*.cpp")
-    add_includedirs(as_addon .. "/scriptany", {public = true})
+-- 8. any
+add_files(as_addon .. "/scriptany/*.cpp")
+add_includedirs(as_addon .. "/scriptany", { public = true })
 
-    add_files(as_addon ..  "/contextmgr/*.cpp")
-    add_includedirs(as_addon .. "/contextmgr", {public = true})
+add_files(as_addon .. "/contextmgr/*.cpp")
+add_includedirs(as_addon .. "/contextmgr", { public = true })
 
-    add_files(as_addon ..  "/datetime/*.cpp")
-    add_includedirs(as_addon .. "/datetime", {public = true})
+add_files(as_addon .. "/datetime/*.cpp")
+add_includedirs(as_addon .. "/datetime", { public = true })
 
-    add_files(as_addon ..  "/scripthandle/*.cpp")
-    add_includedirs(as_addon .. "/scripthandle", {public = true})
+add_files(as_addon .. "/scripthandle/*.cpp")
+add_includedirs(as_addon .. "/scripthandle", { public = true })
 
-    add_files(as_addon ..  "/scripthelper/*.cpp")
-    add_includedirs(as_addon .. "/scripthelper", {public = true})
+add_files(as_addon .. "/scripthelper/*.cpp")
+add_includedirs(as_addon .. "/scripthelper", { public = true })
 
-    add_files(as_addon ..  "/weakref/*.cpp")
-    add_includedirs(as_addon .. "/weakref", {public = true})
+add_files(as_addon .. "/weakref/*.cpp")
+add_includedirs(as_addon .. "/weakref", { public = true })
 
-    add_files(as_addon ..  "/debugger/*.cpp")
-    add_includedirs(as_addon .. "/debugger", {public = true})
+add_files(as_addon .. "/debugger/*.cpp")
+add_includedirs(as_addon .. "/debugger", { public = true })
 
-    -- Дефайны для отключения исключений в самом AS (если нужно)
-    -- AS_NO_EXCEPTIONS уберет try-catch внутри AS, но C++ исключения всё равно могут летать
-    add_defines("AS_NO_EXCEPTIONS")
+-- Дефайны для отключения исключений в самом AS (если нужно)
+-- AS_NO_EXCEPTIONS уберет try-catch внутри AS, но C++ исключения всё равно могут летать
+add_defines("AS_NO_EXCEPTIONS")
 
-    add_cxflags(
-        "-Wno-deprecated-declarations",
-        {tools = "clang_cl"}
-    )
+add_cxflags(
+    "-Wno-deprecated-declarations",
+    { tools = "clang_cl" }
+)
 
 -------------------------------------------------------------------------------
 -- External Modules
@@ -111,63 +110,63 @@ target("angelscript_lib")
 includes("GitModules/AngelScript-JIT-Compiler")
 
 target("AngelEngine")
-    set_kind("static")
+set_kind("static")
 
-    add_packages("eastl", {public = true})
-    add_defines("EASTL_OPENSOURCE")
-    add_defines("AS_PROCESS_METADATA=1")
-    -- add_defines("EASTL_USER_DEFINED_ALLOCATOR=0")
+add_packages("eastl", { public = true })
+add_defines("EASTL_OPENSOURCE")
+add_defines("AS_PROCESS_METADATA=1")
+-- add_defines("EASTL_USER_DEFINED_ALLOCATOR=0")
 
-    add_files("AngelEngine/*.cpp", {public = true})
-    -- Точечно глушим варнинг для всего аддона строк (чтобы не вылезло в других файлах аддона)
-    add_files("AngelEngine/Addons/**.cpp", {
-        cxflags = "-Wno-unused-but-set-variable"
-    })
-    add_headerfiles("AngelEngine/**.h", {public = true})
+add_files("AngelEngine/*.cpp", { public = true })
+-- Точечно глушим варнинг для всего аддона строк (чтобы не вылезло в других файлах аддона)
+add_files("AngelEngine/Addons/**.cpp", {
+    cxflags = "-Wno-unused-but-set-variable"
+})
+add_headerfiles("AngelEngine/**.h", { public = true })
 
-    -- Подключаем asbind20 (header-only библиотека, но указываем include)
-    add_includedirs("GitModules/asbind20/include")
-    add_includedirs("AngelEngine/Addons")
+-- Подключаем asbind20 (header-only библиотека, но указываем include)
+add_includedirs("GitModules/asbind20/include")
+add_includedirs("AngelEngine/Addons")
 
-    add_deps("angelscript_lib")
-    add_deps("as_jit")
+add_deps("AngelScript")
+add_deps("AngelScriptJIT")
 
-    add_ldflags("-fuse-ld=lld", { tools = "clang-cl" })
-    add_cxflags("/utf-8")
+add_ldflags("-fuse-ld=lld", { tools = "clang-cl" })
+add_cxflags("/utf-8")
 
-    add_cxflags(
-        "-Wno-unused-command-line-argument",
-        {tools = "clang_cl"}
-    )
+add_cxflags(
+    "-Wno-unused-command-line-argument",
+    { tools = "clang_cl" }
+)
 
-    -- Разрешаем использование std::print и других новых фич
-    add_defines("_CRT_SECURE_NO_WARNINGS")
+-- Разрешаем использование std::print и других новых фич
+add_defines("_CRT_SECURE_NO_WARNINGS")
 
 -------------------------------------------------------------------------------
 -- Target: Main Executable
 -------------------------------------------------------------------------------
 target("AngelScriptPlayground")
-    set_kind("binary")
+set_kind("binary")
 
-    add_files("src/**.cpp")
-    add_headerfiles("src/TestContext.hpp")
-    add_deps("AngelEngine")
+add_files("src/**.cpp")
+add_headerfiles("src/TestContext.hpp")
+add_deps("AngelEngine")
 
-    add_includedirs("GitModules/asbind20/include")
-    add_includedirs("src")
+add_includedirs("GitModules/asbind20/include")
+add_includedirs("src")
 
-    add_packages("eastl", {public = true})
-    add_defines("EASTL_OPENSOURCE")
+add_packages("eastl", { public = true })
+add_defines("EASTL_OPENSOURCE")
 
-    add_ldflags("-fuse-ld=lld", { tools = "clang-cl" })
-    add_cxflags("/utf-8")
+add_ldflags("-fuse-ld=lld", { tools = "clang-cl" })
+add_cxflags("/utf-8")
 
-    add_cxflags(
-        "-Wno-unused-command-line-argument",
-        {tools = "clang_cl"}
-    )
+add_cxflags(
+    "-Wno-unused-command-line-argument",
+    { tools = "clang_cl" }
+)
 
-    -- Разрешаем использование std::print и других новых фич
-    add_defines("_CRT_SECURE_NO_WARNINGS")
+-- Разрешаем использование std::print и других новых фич
+add_defines("_CRT_SECURE_NO_WARNINGS")
 
-    set_rundir("$(projectdir)")
+set_rundir("$(projectdir)")
