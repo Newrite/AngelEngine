@@ -1,0 +1,9 @@
+[submodule "GitModules/asbind20"]
+	path = GitModules/asbind20
+	url = https://github.com/HenryAWE/asbind20.git
+[submodule "GitModules/AngelScript-JIT-Compiler"]
+	path = GitModules/AngelScript-JIT-Compiler
+	url = https://github.com/Newrite/AngelScript-JIT-Compiler.git
+[submodule "GitModules/angelscript"]
+	path = GitModules/angelscript
+	url = https://github.com/codecat/angelscript-mirror.git

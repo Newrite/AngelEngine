@@ -6,7 +6,7 @@
 
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
-#include <EASTL/map.h>
+#include <EASTL/vector_map.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/shared_ptr.h>
 #include <EASTL/functional.h>
@@ -75,13 +75,13 @@ namespace AngelEngine
             ClearAll();
         }
 
-        void Subscribe(const eastl::string& eventName, asIScriptFunction* callback) override
+        void Subscribe(uint32_t eventId, asIScriptFunction* callback) override
         {
             if (!callback) return;
 
             std::scoped_lock lock(mutex_);
             
-            auto it = listeners_.find(eventName);
+            auto it = listeners_.find(eventId);
             eastl::shared_ptr<eastl::vector<ScopedScriptFunction>> newListeners;
 
             if (it != listeners_.end() && it->second)
@@ -95,9 +95,9 @@ namespace AngelEngine
             }
             
             newListeners->push_back(ScopedScriptFunction(callback));
-            listeners_[eventName] = newListeners;
+            listeners_[eventId] = newListeners;
             
-            std::println("[EventManager] Subscribed to event: {} (Func: {})", eventName.c_str(), callback->GetDeclaration());
+            std::println("[EventManager] Subscribed to event ID: {:#010x} (Func: {})", eventId, callback->GetDeclaration());
         }
 
         void ClearAll() override
@@ -115,13 +115,13 @@ namespace AngelEngine
             deferredQueue_.clear();
         }
 
-        void DispatchDirect(asIScriptEngine* engine, const eastl::string& eventName, const ArgInjector& argInjector) override
+        void DispatchDirect(asIScriptEngine* engine, uint32_t eventId, const ArgInjector& argInjector) override
         {
             // Zero-allocation (on heap), thread-safe retrieval
             eastl::shared_ptr<eastl::vector<ScopedScriptFunction>> callbacks;
             {
                 std::scoped_lock lock(mutex_);
-                auto it = listeners_.find(eventName);
+                auto it = listeners_.find(eventId);
                 if (it != listeners_.end())
                 {
                     callbacks = it->second;
@@ -140,7 +140,7 @@ namespace AngelEngine
                 int r = ctx->Prepare(func);
                 if (r < 0)
                 {
-                    std::println(stderr, "[EventManager] Failed to prepare context for event '{}'", eventName.c_str());
+                    std::println(stderr, "[EventManager] Failed to prepare context for event {:#010x}", eventId);
                     continue;
                 }
 
@@ -152,12 +152,12 @@ namespace AngelEngine
 
                 if (r == asEXECUTION_SUSPENDED)
                 {
-                    std::println(stderr, "[EventManager] ERROR: Direct Event '{}' attempted to Wait/Suspend. This is forbidden in synchronous hooks!", eventName.c_str());
+                    std::println(stderr, "[EventManager] ERROR: Direct Event {:#010x} attempted to Wait/Suspend!", eventId);
                     ctx->Abort();
                 }
                 else if (r == asEXECUTION_EXCEPTION)
                 {
-                    std::println(stderr, "[EventManager] Exception in Direct Event '{}': {}", eventName.c_str(), ctx->GetExceptionString());
+                    std::println(stderr, "[EventManager] Exception in Direct Event {:#010x}: {}", eventId, ctx->GetExceptionString());
                     asIScriptFunction* exFunc = ctx->GetExceptionFunction();
                     if(exFunc)
                          std::println(stderr, "  In function: {}", exFunc->GetDeclaration());
@@ -171,11 +171,11 @@ namespace AngelEngine
             engine->ReturnContext(ctx);
         }
 
-        void DispatchDeferred(const eastl::string& eventName, const ArgInjector& argInjector) override
+        void DispatchDeferred(uint32_t eventId, const ArgInjector& argInjector) override
         {
             std::scoped_lock lock(mutex_);
             
-            auto it = listeners_.find(eventName);
+            auto it = listeners_.find(eventId);
             if (it == listeners_.end() || !it->second) return;
 
             // Copy functions to queue for ExecutionManager
@@ -198,7 +198,8 @@ namespace AngelEngine
 
     private:
         std::mutex mutex_;
-        eastl::map<eastl::string, eastl::shared_ptr<eastl::vector<ScopedScriptFunction>>> listeners_;
+        // ЗДЕСЬ СОВЕРШАЕТСЯ МАГИЯ: Плоский массив, сгруппированный по 32-битному ключу!
+        eastl::vector_map<uint32_t, eastl::shared_ptr<eastl::vector<ScopedScriptFunction>>> listeners_;
         eastl::vector<QueuedEvent> deferredQueue_;
     };
 }

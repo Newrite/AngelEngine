@@ -13,7 +13,7 @@ namespace AngelEngine
 {
     export namespace EventsName
     {
-        const eastl::string OnTick {"OnTick"};
+        constexpr uint32_t OnTick = HashString("OnTick");
     }
     
     export class EventBinding final : public IScriptBinding

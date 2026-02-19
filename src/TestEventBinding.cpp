@@ -13,8 +13,8 @@ namespace AngelEngineTest
 {
     export namespace EventsName
     {
-        const eastl::string CustomEvent {"CustomEvent"};
-        const eastl::string DeferredEvent {"DeferredEvent"};
+        constexpr uint32_t DeferredEvent = AngelEngine::HashString("DeferredEvent");
+        constexpr uint32_t CustomEvent = AngelEngine::HashString("CustomEvent");
     }
     
     export class TestEventBinding final : public AngelEngine::IScriptBinding

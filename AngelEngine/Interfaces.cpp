@@ -61,6 +61,29 @@ namespace AngelEngine
         const std::filesystem::path scriptsPathStd;
         const std::filesystem::path scriptsPathMod;
     };
+    
+    // --- String Hashing (Compile-Time & Runtime) ---
+    export constexpr uint32_t HashString(const char* str)
+    {
+        uint32_t hash = 2166136261u;
+        while (*str)
+        {
+            hash ^= static_cast<uint32_t>(*str++);
+            hash *= 16777619u;
+        }
+        return hash;
+    }
+
+    export constexpr uint32_t HashString(const eastl::string& str)
+    {
+        uint32_t hash = 2166136261u;
+        for (char c : str)
+        {
+            hash ^= static_cast<uint32_t>(c);
+            hash *= 16777619u;
+        }
+        return hash;
+    }
 
     // --- Pattern Interfaces ---
 
@@ -105,16 +128,16 @@ namespace AngelEngine
         virtual ~IEventManager() = default;
 
         // Подписка из скрипта
-        virtual void Subscribe(const eastl::string& eventName, asIScriptFunction* callback) = 0;
+        virtual void Subscribe(uint32_t eventId, asIScriptFunction* callback) = 0;
         
         // Очистка при перезагрузке (HotReload)
         virtual void ClearAll() = 0;
 
         // 1. Прямой вызов (мгновенно, блокирует поток, можно менять inout аргументы)
-        virtual void DispatchDirect(asIScriptEngine* engine, const eastl::string& eventName, const ArgInjector& argInjector = nullptr) = 0;
+        virtual void DispatchDirect(asIScriptEngine* engine, uint32_t eventId, const ArgInjector& argInjector = nullptr) = 0;
 
         // 2. Отложенный вызов (добавляет в очередь на следующий Tick)
-        virtual void DispatchDeferred(const eastl::string& eventName, const ArgInjector& argInjector = nullptr) = 0;
+        virtual void DispatchDeferred(uint32_t eventId, const ArgInjector& argInjector = nullptr) = 0;
         
         // Метод для ExecutionManager, чтобы забрать очередь отложенных событий
         struct QueuedEvent {

@@ -6,6 +6,7 @@
 #include <chrono>
 
 #include <angelscript.h>
+#include <EASTL/chrono.h>
 
 #include <EASTL/memory.h>
 #include <EASTL/unique_ptr.h>
@@ -15,6 +16,7 @@
 import AngelEngine.Interfaces;
 import AngelEngine.ScriptEngine;
 import AngelEngine.Infrastructure;
+import AngelEngine.EventsBinding;
 import AngelEngineTest.EventsBinding;
 
 namespace fs = std::filesystem;
@@ -140,6 +142,39 @@ void SetupEnvironment() {
             }
         )";
     }
+    
+    // --- ПЕРФОРМАНС ТЕСТЫ ---
+
+    fs::create_directories("angelscripts/mods/PerfLoopTest");
+    {
+        std::ofstream file("angelscripts/mods/PerfLoopTest/main.as");
+        file << R"(
+            uint64 loopCounter = 0; // Используем 64 бита, чтобы избежать переполнения
+            
+            void main() {
+                // Наш Watchdog убьет этот цикл ровно через 1 секунду (1000мс)
+                while(true) { 
+                    loopCounter++; 
+                }
+            }
+        )";
+    }
+
+    fs::create_directories("angelscripts/mods/PerfTickTest");
+    {
+        std::ofstream file("angelscripts/mods/PerfTickTest/main.as");
+        file << R"(
+            uint64 tickCounter = 0;
+            
+            void main() {
+                SubscribeTick(@OnTick);
+            }
+
+            void OnTick(float dt) {
+                tickCounter++;
+            }
+        )";
+    }
 }
 
 int main() {
@@ -211,9 +246,6 @@ int main() {
         std::println(stderr, "Run failed. Check logs.");
         std::exit(1);
     }
-    
-    // IMPORTANT: RunAllMods only schedules main(). We must Tick() to execute it.
-    engine->Tick(1.0f/60.0f);
 
     // Get module and variable pointers
     asIScriptModule* mod = engine->GetEngine()->GetModule("TestMod");
@@ -231,6 +263,8 @@ int main() {
     // main sets counter to 42. OnTick increments it.
     // Since we called Tick once, counter should be 43 (42 + 1).
     // main sets actor health to 80. OnTick increments it to 81.
+    
+    engine->Tick(1.0f/60.0f);
     
     std::println("Counter after first tick: {}", *counterPtr);
     TEST_ASSERT(*counterPtr == 43, "Initial globalCounter should be 43 (42 + 1 tick)");
@@ -346,7 +380,7 @@ int main() {
     std::println("Testing Direct Dispatch...");
     
     // Use ArgInjector to pass arguments
-    engine->GetEventManager()->DispatchDirect(engine->GetEngine(), "CustomEvent", [](asIScriptContext* ctx) {
+    engine->GetEventManager()->DispatchDirect(engine->GetEngine(), AngelEngineTest::EventsName::CustomEvent, [](asIScriptContext* ctx) {
         ctx->SetArgDWord(0, 123);
         ctx->SetArgFloat(1, 3.14f);
     });
@@ -364,7 +398,7 @@ int main() {
 
     // Deferred Dispatch
     std::println("Testing Deferred Dispatch...");
-    engine->GetEventManager()->DispatchDeferred("DeferredEvent");
+    engine->GetEventManager()->DispatchDeferred(AngelEngineTest::EventsName::DeferredEvent);
 
     // Verify it didn't execute yet
     bool foundDeferred = false;
@@ -606,6 +640,70 @@ int main() {
     engine->GetExecutionManager()->ReturnContext(engine->GetEngine(), exceptCtx, nullptr);
     
     std::println("Exception test passed");
+    
+    // Phase 11: Performance Benchmarks
+    std::println("\n========================================");
+    std::println("Phase 11: Performance Benchmarks");
+    std::println("========================================");
+    
+    // --- ОЧИСТКА СОСТОЯНИЯ ---
+    // Убиваем все висящие контексты и сбрасываем Watchdog
+    engine->GetExecutionManager()->Renew();
+    // Отписываем ВСЕ старые моды (TestMod и т.д.) от эвентов, чтобы они не спамили в консоль
+    engine->GetEventManager()->ClearAll();
+    
+    // Очищаем буфер вывода на всякий случай
+    testBinding->capturedOutput.clear();
+
+    // --- Benchmark 1: Raw Loop Throughput ---
+    std::println("Starting Benchmark 1 (Raw While Loop)... Please wait 1 second.");
+    
+    // Мы ожидаем, что этот мод упадет по Watchdog, поэтому не проверяем has_value()
+    engine->RunMod("PerfLoopTest");
+
+    asIScriptModule* perfLoopMod = engine->GetEngine()->GetModule("PerfLoopTest");
+    TEST_ASSERT(perfLoopMod != nullptr, "PerfLoopTest module not found");
+    
+    int varLoopIdx = perfLoopMod->GetGlobalVarIndexByName("loopCounter");
+    uint64_t* loopCounterPtr = (uint64_t*)perfLoopMod->GetAddressOfGlobalVar(varLoopIdx);
+    
+    // Печатаем результат с разделителями разрядов для красоты (C++23)
+    std::println("\n[RESULT 1] Raw loop iterations in 1 second: {:L}", *loopCounterPtr);
+
+
+    // --- Benchmark 2: Event Dispatching Throughput ---
+    std::println("\nStarting Benchmark 2 (Event Dispatching)... Please wait 1 second.");
+    
+    auto perfRunRes = engine->RunMod("PerfTickTest");
+    TEST_ASSERT(perfRunRes.has_value(), "PerfTickTest failed to start");
+
+    asIScriptModule* perfTickMod = engine->GetEngine()->GetModule("PerfTickTest");
+    TEST_ASSERT(perfTickMod != nullptr, "PerfTickTest module not found");
+    
+    int varTickIdx = perfTickMod->GetGlobalVarIndexByName("tickCounter");
+    uint64_t* tickCounterPtr = (uint64_t*)perfTickMod->GetAddressOfGlobalVar(varTickIdx);
+    
+    // Сбрасываем старые тики, накопленные за время предыдущих фаз теста
+    *tickCounterPtr = 0;
+
+    // Насилуем движок вызовами Tick() ровно 1 секунду
+    auto startTime = eastl::chrono::steady_clock::now();
+    uint64_t cppTicks = 0;
+    auto second = eastl::chrono::seconds(1);
+
+    while (eastl::chrono::steady_clock::now() - startTime < second)
+    {
+        engine->Tick(0.016f);
+        cppTicks++;
+    }
+
+    std::println("\n[RESULT 2] C++ Ticks executed in 1 second:  {:L}", cppTicks);
+    std::println("[RESULT 2] Script OnTick handled in 1 second: {:L}", *tickCounterPtr);
+    
+    TEST_ASSERT(*tickCounterPtr > 0, "Tick performance test failed (0 ticks handled)");
+    TEST_ASSERT(*tickCounterPtr == cppTicks, "Tick drift detected! Handled events do not match dispatched events.");
+    
+    std::println("========================================\n");
 
     std::println("SUCCESS: All tests passed.");
     return 0;

@@ -38,8 +38,8 @@ target("angelscript_lib")
     set_kind("static")
     set_warnings("none") -- Отключаем варнинги для чужого кода, чтобы не ломать билд
 
-    local as_root = "angelscript/sdk/angelscript"
-    local as_addon = "angelscript/sdk/add_on"
+    local as_root = "GitModules/angelscript/sdk/angelscript"
+    local as_addon = "GitModules/angelscript/sdk/add_on"
 
     -- Core AngelScript
     add_files(as_root .. "/source/*.cpp")
@@ -106,38 +106,9 @@ target("angelscript_lib")
     )
 
 -------------------------------------------------------------------------------
--- Target: JIT Library
+-- External Modules
 -------------------------------------------------------------------------------
-target("as_jit")
-    set_kind("static")
-    set_warnings("none")
-
-    local jit_root = "AngelScript-JIT-Compiler" -- Путь к склонированному репо
-    local as_root = "angelscript/sdk/angelscript"
-
-    add_files(jit_root .. "/*.cpp")
-
-    -- Исключаем несовместимые файлы
-        if is_plat("windows") then
-            remove_files(jit_root .. "/virtual_asm_linux.cpp")
-        else
-            remove_files(jit_root .. "/virtual_asm_windows.cpp")
-        end
-
-        if is_arch("x64") then
-            remove_files(jit_root .. "/virtual_asm_x86.cpp")
-        else
-            remove_files(jit_root .. "/virtual_asm_x64.cpp")
-        end
-
-    add_includedirs(jit_root, {public = true})
-
-    -- Важно: JIT должен знать путь к заголовкам самого AngelScript
-    add_includedirs(as_root .. "/source")
-    add_includedirs(as_root .. "/include")
-
-    -- JIT использует некоторые дефайны для определения платформы,
-    -- но xmake и исходники обычно сами справляются (AS_JIT_AMD64 определяется автоматически)
+includes("GitModules/AngelScript-JIT-Compiler")
 
 target("AngelEngine")
     set_kind("static")
@@ -155,7 +126,7 @@ target("AngelEngine")
     add_headerfiles("AngelEngine/**.h", {public = true})
 
     -- Подключаем asbind20 (header-only библиотека, но указываем include)
-    add_includedirs("asbind20/include")
+    add_includedirs("GitModules/asbind20/include")
     add_includedirs("AngelEngine/Addons")
 
     add_deps("angelscript_lib")
@@ -182,7 +153,7 @@ target("AngelScriptPlayground")
     add_headerfiles("src/TestContext.hpp")
     add_deps("AngelEngine")
 
-    add_includedirs("asbind20/include")
+    add_includedirs("GitModules/asbind20/include")
     add_includedirs("src")
 
     add_packages("eastl", {public = true})
