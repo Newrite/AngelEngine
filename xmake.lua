@@ -112,7 +112,8 @@ target("AngelEngine")
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")
 
-    add_files("AngelEngine/*.cpp", { public = true })
+    add_files("AngelEngine/*.cpp|EASTL_compat.cpp", { public = true })
+    add_files("AngelEngine/EASTL_compat.cpp")
 
     add_files("AngelEngine/Addons/**.cpp", {
         cxflags = "-Wno-unused-but-set-variable"
