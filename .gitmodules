@@ -6,4 +6,4 @@
 	url = https://github.com/Newrite/AngelScript-JIT-Compiler.git
 [submodule "GitModules/angelscript"]
 	path = GitModules/angelscript
-	url = https://github.com/codecat/angelscript-mirror.git
+	url = https://github.com/anjo76/angelscript.git
