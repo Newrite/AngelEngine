@@ -175,6 +175,91 @@ void SetupEnvironment() {
             }
         )";
     }
+    
+// Скрипт стресс-теста математики (N-Body Simulation - Data Oriented)
+    fs::create_directories("angelscripts/mods/MathStressTest");
+    {
+        std::ofstream file("angelscripts/mods/MathStressTest/main.as", std::ios::trunc);
+        file << R"(
+            void SimulateGravity(int iterations, int particleCount) {
+                array<double> posX(particleCount), posY(particleCount), posZ(particleCount);
+                array<double> velX(particleCount), velY(particleCount), velZ(particleCount);
+                array<double> mass(particleCount);
+                
+                for (int i = 0; i < particleCount; i++) {
+                    posX[i] = double(i) * 0.1; posY[i] = double(i) * 0.2; posZ[i] = double(i) * 0.3;
+                    velX[i] = 0.0; velY[i] = 0.0; velZ[i] = 0.0;
+                    mass[i] = 10.0;
+                }
+
+                for (int iter = 0; iter < iterations; iter++) {
+                    for (int i = 0; i < particleCount; i++) {
+                        double px = posX[i]; double py = posY[i]; double pz = posZ[i];
+                        double vx = velX[i]; double vy = velY[i]; double vz = velZ[i];
+                        double m1 = mass[i];
+
+                        for (int j = 0; j < particleCount; j++) {
+                            if (i == j) continue;
+                            
+                            double dx = posX[j] - px;
+                            double dy = posY[j] - py;
+                            double dz = posZ[j] - pz;
+                            
+                            double distSq = dx*dx + dy*dy + dz*dz;
+                            double invDist = 1.0 / (distSq + 0.001); 
+                            double force = (m1 * mass[j]) * (invDist * invDist);
+                            
+                            vx += dx * force;
+                            vy += dy * force;
+                            vz += dz * force;
+                        }
+                        velX[i] = vx; velY[i] = vy; velZ[i] = vz;
+                    }
+                }
+            }
+
+            void main() {} // <--- ТОЧКА ВХОДА ДЛЯ RUNMOD
+        )";
+    }
+    
+    // Скрипт стресс-теста памяти и прыжков (QuickSort)
+    fs::create_directories("angelscripts/mods/JumpStressTest");
+    {
+        std::ofstream file("angelscripts/mods/JumpStressTest/main.as", std::ios::trunc);
+        file << R"(
+            void QuickSort(array<int>@ arr, int left, int right) {
+                int i = left, j = right;
+                int pivot = arr[(left + right) / 2];
+
+                while (i <= j) {
+                    while (arr[i] < pivot) i++;
+                    while (arr[j] > pivot) j--;
+                    if (i <= j) {
+                        int tmp = arr[i];
+                        arr[i] = arr[j];
+                        arr[j] = tmp;
+                        i++;
+                        j--;
+                    }
+                }
+
+                if (left < j) QuickSort(arr, left, j);
+                if (i < right) QuickSort(arr, i, right);
+            }
+
+            void RunSort(int size) {
+                array<int> data(size);
+                int seed = 1337;
+                for (int i = 0; i < size; i++) {
+                    seed = (seed * 214013 + 2531011);
+                    data[i] = (seed >> 16) & 0x7FFF;
+                }
+                QuickSort(data, 0, size - 1);
+            }
+
+            void main() {} // <--- ТОЧКА ВХОДА ДЛЯ RUNMOD
+        )";
+    }
 }
 
 int main() {
@@ -193,7 +278,7 @@ int main() {
     auto factory = eastl::make_unique<StandardComponentFactory>(config);
 
     // Engine
-    auto engineResult = ScriptEngine::MakeEngine(std::move(factory));
+    auto engineResult = ScriptEngine::MakeEngine(std::move(factory), false);
     if (!engineResult.has_value())
     {
         std::println(stderr, "Failed to create ScriptEngine");
@@ -702,6 +787,47 @@ int main() {
     
     TEST_ASSERT(*tickCounterPtr > 0, "Tick performance test failed (0 ticks handled)");
     TEST_ASSERT(*tickCounterPtr == cppTicks, "Tick drift detected! Handled events do not match dispatched events.");
+    
+    // --- BENCHMARK 3: FPU STRESS (N-Body) ---
+    std::println("\nStarting Benchmark 3 (N-Body FPU Stress)...");
+    auto res3 = engine->RunMod("MathStressTest");
+    TEST_ASSERT(res3.has_value(), "MathStressTest failed to compile or run!");
+
+    asIScriptModule* mathMod = engine->GetEngine()->GetModule("MathStressTest");
+    TEST_ASSERT(mathMod != nullptr, "MathStressTest module is null!");
+
+    asIScriptFunction* nbodyFunc = mathMod->GetFunctionByDecl("void SimulateGravity(int, int)");
+    TEST_ASSERT(nbodyFunc != nullptr, "Function SimulateGravity not found!");
+    
+    ctx = engine->GetEngine()->CreateContext();
+    ctx->Prepare(nbodyFunc);
+    ctx->SetArgDWord(0, 100);  // 100 итераций
+    ctx->SetArgDWord(1, 1000); // 1000 частиц (100 миллионов циклов математики)
+    
+    auto mathStart = eastl::chrono::steady_clock::now();
+    ctx->Execute();
+    auto mathEnd = eastl::chrono::steady_clock::now();
+    
+    std::println("[RESULT 3] N-Body Math executed in: {} ms", 
+        eastl::chrono::duration_cast<eastl::chrono::milliseconds>(mathEnd - mathStart).count());
+
+    // --- BENCHMARK 4: BRANCHING STRESS (QuickSort) ---
+    std::println("\nStarting Benchmark 4 (QuickSort Branching Stress)...");
+    engine->RunMod("JumpStressTest");
+    asIScriptModule* jumpMod = engine->GetEngine()->GetModule("JumpStressTest");
+    asIScriptFunction* sortFunc = jumpMod->GetFunctionByDecl("void RunSort(int)");
+    
+    ctx->Prepare(sortFunc);
+    ctx->SetArgDWord(0, 1000000); // Сортируем массив из 1 миллиона элементов
+    
+    auto sortStart = eastl::chrono::steady_clock::now();
+    ctx->Execute();
+    auto sortEnd = eastl::chrono::steady_clock::now();
+    
+    std::println("[RESULT 4] 1 Million items QuickSort executed in: {} ms", 
+        eastl::chrono::duration_cast<eastl::chrono::milliseconds>(sortEnd - sortStart).count());
+    
+    ctx->Release();
     
     std::println("========================================\n");
 
