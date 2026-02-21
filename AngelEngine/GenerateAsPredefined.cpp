@@ -2,40 +2,40 @@ module;
 
 #include <cassert>
 #include <format>
-#include <fstream>
 #include <string>
 #include <string_view>
 #include <filesystem>
+#include <cstdio> // Для надежного C-style FILE*
 
 #include "angelscript.h"
 
 export module AngelEngine.PredefinedGenerator;
 
+import AngelEngine.Logger;
+
 namespace AngelEngine
 {
-    template <class Stream>
-    void printEnumList(const asIScriptEngine* engine, Stream& stream)
+    void printEnumList(const asIScriptEngine* engine, std::string& out)
     {
         for (int i = 0; i < engine->GetEnumCount(); i++)
         {
             const auto e = engine->GetEnumByIndex(i);
             if (not e) continue;
             const std::string_view ns = e->GetNamespace();
-            if (not ns.empty()) stream << std::format("namespace {} {{\n", ns);
-            stream << std::format("enum {} {{\n", e->GetName());
+            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
+            out += std::format("enum {} {{\n", e->GetName());
             for (int j = 0; j < e->GetEnumValueCount(); ++j)
             {
-                stream << std::format("\t{}", e->GetEnumValueByIndex(j, nullptr));
-                if (j < e->GetEnumValueCount() - 1) stream << ",";
-                stream << "\n";
+                out += std::format("\t{}", e->GetEnumValueByIndex(j, nullptr));
+                if (j < e->GetEnumValueCount() - 1) out += ",";
+                out += "\n";
             }
-            stream << "}\n";
-            if (not ns.empty()) stream << "}\n";
+            out += "}\n";
+            if (not ns.empty()) out += "}\n";
         }
     }
 
-    template <class Stream>
-    void printClassTypeList(const asIScriptEngine* engine, Stream& stream)
+    void printClassTypeList(const asIScriptEngine* engine, std::string& out)
     {
         for (int i = 0; i < engine->GetObjectTypeCount(); i++)
         {
@@ -43,69 +43,66 @@ namespace AngelEngine
             if (not t) continue;
 
             const std::string_view ns = t->GetNamespace();
-            if (not ns.empty()) stream << std::format("namespace {} {{\n", ns);
+            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
 
-            stream << std::format("class {}", t->GetName());
+            out += std::format("class {}", t->GetName());
             if (t->GetSubTypeCount() > 0)
             {
-                stream << "<";
+                out += "<";
                 for (int sub = 0; sub < t->GetSubTypeCount(); ++sub)
                 {
-                    if (sub < t->GetSubTypeCount() - 1) stream << ", ";
+                    if (sub < t->GetSubTypeCount() - 1) out += ", ";
                     const auto st = t->GetSubType(sub);
-                    stream << st->GetName();
+                    out += st->GetName();
                 }
 
-                stream << ">";
+                out += ">";
             }
 
-            stream << "{\n";
+            out += "{\n";
             for (int j = 0; j < t->GetBehaviourCount(); ++j)
             {
                 asEBehaviours behaviours;
                 const auto f = t->GetBehaviourByIndex(j, &behaviours);
-                if (behaviours == asBEHAVE_CONSTRUCT
-                    || behaviours == asBEHAVE_DESTRUCT)
+                if (behaviours == asBEHAVE_CONSTRUCT || behaviours == asBEHAVE_DESTRUCT)
                 {
-                    stream << std::format("\t{};\n", f->GetDeclaration(false, true, true));
+                    out += std::format("\t{};\n", f->GetDeclaration(false, true, true));
                 }
             }
             for (int j = 0; j < t->GetMethodCount(); ++j)
             {
                 const auto m = t->GetMethodByIndex(j);
-                stream << std::format("\t{};\n", m->GetDeclaration(false, true, true));
+                out += std::format("\t{};\n", m->GetDeclaration(false, true, true));
             }
             for (int j = 0; j < t->GetPropertyCount(); ++j)
             {
-                stream << std::format("\t{};\n", t->GetPropertyDeclaration(j, true));
+                out += std::format("\t{};\n", t->GetPropertyDeclaration(j, true));
             }
             for (int j = 0; j < t->GetChildFuncdefCount(); ++j)
             {
-                stream << std::format("\tfuncdef {};\n",
+                out += std::format("\tfuncdef {};\n",
                                       t->GetChildFuncdef(j)->GetFuncdefSignature()->GetDeclaration(false));
             }
-            stream << "}\n";
-            if (not ns.empty()) stream << "}\n";
+            out += "}\n";
+            if (not ns.empty()) out += "}\n";
         }
     }
 
-    template <class Stream>
-    void printGlobalFunctionList(const asIScriptEngine* engine, Stream& stream)
+    void printGlobalFunctionList(const asIScriptEngine* engine, std::string& out)
     {
         for (int i = 0; i < engine->GetGlobalFunctionCount(); i++)
         {
             const auto f = engine->GetGlobalFunctionByIndex(i);
             if (not f) continue;
             const std::string_view ns = f->GetNamespace();
-            if (not ns.empty()) stream << std::format("namespace {} {{ ", ns);
-            stream << std::format("{};", f->GetDeclaration(false, false, true));
-            if (not ns.empty()) stream << " }";
-            stream << "\n";
+            if (not ns.empty()) out += std::format("namespace {} {{ ", ns);
+            out += std::format("{};", f->GetDeclaration(false, false, true));
+            if (not ns.empty()) out += " }";
+            out += "\n";
         }
     }
 
-    template <class Stream>
-    void printGlobalPropertyList(const asIScriptEngine* engine, Stream& stream)
+    void printGlobalPropertyList(const asIScriptEngine* engine, std::string& out)
     {
         for (int i = 0; i < engine->GetGlobalPropertyCount(); i++)
         {
@@ -118,44 +115,84 @@ namespace AngelEngine
             if (t.empty()) continue;
 
             std::string_view ns = ns0;
-            if (not ns.empty()) stream << std::format("namespace {} {{ ", ns);
+            if (not ns.empty()) out += std::format("namespace {} {{ ", ns);
 
-            stream << std::format("{} {};", t, name);
-            if (not ns.empty()) stream << " }";
-            stream << "\n";
+            out += std::format("{} {};", t, name);
+            if (not ns.empty()) out += " }";
+            out += "\n";
         }
     }
 
-    template <class Stream>
-    void printGlobalTypedef(const asIScriptEngine* engine, Stream& stream)
+    void printGlobalTypedef(const asIScriptEngine* engine, std::string& out)
     {
         for (int i = 0; i < engine->GetTypedefCount(); ++i)
         {
             const auto type = engine->GetTypedefByIndex(i);
             if (not type) continue;
             const std::string_view ns = type->GetNamespace();
-            if (not ns.empty()) stream << std::format("namespace {} {{\n", ns);
-            stream << std::format(
+            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
+            out += std::format(
                 "typedef {} {};\n", engine->GetTypeDeclaration(type->GetSubTypeId(0)), type->GetName());
-            if (not ns.empty()) stream << "}\n";
+            if (not ns.empty()) out += "}\n";
         }
     }
-
-
+    
     /// @brief Generate 'as.predefined' file, which contains all defined symbols in C++. It is used by the language server.
     export void GenerateScriptPredefined(const asIScriptEngine* engine, const std::filesystem::path& path)
     {
+        Log::Info("[PredefinedGenerator] Attempting to generate file at: {}", std::filesystem::absolute(path).string());
+
+        std::error_code ec;
+        if (path.has_parent_path())
+        {
+            std::filesystem::create_directories(path.parent_path(), ec);
+            if (ec)
+            {
+                Log::Error("[PredefinedGenerator] Failed to create directories! Path: {}. Error: {}", path.parent_path().string(), ec.message());
+                // Не делаем return; возможно, директория уже существует, но заблокирована для проверки
+            }
+        }
+
+        // Собираем весь текст в один буфер
+        std::string out;
+        out.reserve(1024 * 512); // Сразу выделяем 512 KB, чтобы избежать реаллокаций памяти
+
+        Log::Info("[PredefinedGenerator] Generating content...");
         
-        std::ofstream stream{path.string()};
+        printEnumList(engine, out);
+        printClassTypeList(engine, out);
+        printGlobalFunctionList(engine, out);
+        printGlobalPropertyList(engine, out);
+        printGlobalTypedef(engine, out);
 
-        printEnumList(engine, stream);
+        Log::Info("[PredefinedGenerator] Content generated. Total size: {} bytes", out.size());
 
-        printClassTypeList(engine, stream);
+        // Используем классический C API для записи файла
+        FILE* file = nullptr;
+#ifdef _WIN32
+        // На Windows _wfopen_s корректно работает с юникодом (русские буквы в пути и т.д.)
+        _wfopen_s(&file, path.wstring().c_str(), L"wb");
+#else
+        file = std::fopen(path.string().c_str(), "wb");
+#endif
 
-        printGlobalFunctionList(engine, stream);
+        if (!file)
+        {
+            Log::Error("[PredefinedGenerator] FAILED to open file for writing! Check file permissions or paths. Path: {}", path.string());
+            return;
+        }
 
-        printGlobalPropertyList(engine, stream);
+        // Записываем весь буфер одним гигантским вызовом (максимальная производительность)
+        size_t written = std::fwrite(out.data(), 1, out.size(), file);
+        std::fclose(file);
 
-        printGlobalTypedef(engine, stream);
+        if (written != out.size())
+        {
+            Log::Error("[PredefinedGenerator] FAILED to write full file! Wrote {} out of {} bytes.", written, out.size());
+        }
+        else
+        {
+            Log::Info("[PredefinedGenerator] SUCCESS! Predefined file written to disk.");
+        }
     }
 }
