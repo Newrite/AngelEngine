@@ -5,6 +5,7 @@ module;
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <filesystem>
 
 #include "angelscript.h"
 
@@ -142,11 +143,10 @@ namespace AngelEngine
 
 
     /// @brief Generate 'as.predefined' file, which contains all defined symbols in C++. It is used by the language server.
-    export void GenerateScriptPredefined(const asIScriptEngine* engine, const std::string& path)
+    export void GenerateScriptPredefined(const asIScriptEngine* engine, const std::filesystem::path& path)
     {
-        assert(path.ends_with("as.predefined"));
-
-        std::ofstream stream{path};
+        
+        std::ofstream stream{path.string()};
 
         printEnumList(engine, stream);
 

@@ -13,6 +13,7 @@ export module AngelEngine.EventChannel;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
+import AngelEngine.FrameAllocator;
 
 namespace AngelEngine
 {
@@ -62,7 +63,7 @@ namespace AngelEngine
             if (!ctx) return eastl::unexpected(EventError::ContextPreparationFailed);
 
             eastl::tuple<eastl::vector<Args>...> processingQueues;
-            eastl::vector<asIScriptFunction*> subscribersCopy;
+            eastl::vector<asIScriptFunction*, LinearFrameAllocator> subscribersCopy;
             size_t processingCount = 0;
 
             // 1. Critical Section: Swap queues and copy subscribers
@@ -94,8 +95,8 @@ namespace AngelEngine
             
             // RAII Wrapper to ensure Release() is called on subscribers
             struct ScopedSubscriberList {
-                eastl::vector<asIScriptFunction*>& list;
-                ScopedSubscriberList(eastl::vector<asIScriptFunction*>& l) : list(l) {}
+                eastl::vector<asIScriptFunction*, LinearFrameAllocator>& list;
+                ScopedSubscriberList(eastl::vector<asIScriptFunction*, LinearFrameAllocator>& l) : list(l) {}
                 ~ScopedSubscriberList() {
                     for (auto* f : list) {
                         if (f) f->Release();

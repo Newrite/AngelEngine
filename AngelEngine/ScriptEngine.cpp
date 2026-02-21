@@ -25,6 +25,8 @@ import AngelEngine.Interfaces;
 import AngelEngine.EventsBinding;
 import AngelEngine.ScriptWatcher;
 import AngelEngine.Logger;
+import AngelEngine.FrameAllocator;
+import AngelEngine.Memory;
 
 namespace fs = std::filesystem;
 
@@ -43,11 +45,10 @@ namespace AngelEngine
     public:
         using AsEnginePtr = eastl::unique_ptr<asIScriptEngine, AngelScriptDeleter>;
         using PtrType = eastl::unique_ptr<ScriptEngine>;
-
-        static constexpr const char* AS_PREDEFINED_PATH = "AngelEngine/scripts/as.predefined";
-
-        static eastl::expected<PtrType, EngineError> MakeEngine(eastl::unique_ptr<IEngineComponentFactory> factory, bool useJit = true, bool useAutoGC = false)
+        
+        static eastl::expected<PtrType, EngineError> MakeEngine(eastl::unique_ptr<IEngineComponentFactory> factory, std::filesystem::path asPredefinedPath, bool useJit = true, bool useAutoGC = false)
         {
+            asSetGlobalMemoryFunctions(EngineAlloc, EngineFree);
             asIScriptEngine* rawEngine = asCreateScriptEngine();
             if (!rawEngine)
             {
@@ -61,7 +62,8 @@ namespace AngelEngine
                 eastl::move(engine), 
                 eastl::move(factory),
                 useJit,
-                useAutoGC
+                useAutoGC, 
+                asPredefinedPath
             ));
             
             return scriptEngine;
@@ -95,6 +97,18 @@ namespace AngelEngine
             int r = engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
             if (r < 0) Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
         }
+        
+        void PushTick(float deltaTime)
+        {
+            std::scoped_lock lock(mutex_);
+            
+            // Push Tick Event to Channel
+            if (eventBinding_)
+            {
+                // Assuming PushTick doesn't fail or handles its own errors
+                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
+            }
+        }
 
         eastl::expected<void, EngineError> Tick(float deltaTime) override
         {
@@ -111,13 +125,17 @@ namespace AngelEngine
             }
             
             // Push Tick Event to Channel
-            if (eventBinding_)
-            {
-                // Assuming PushTick doesn't fail or handles its own errors
-                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
-            }
+            // if (eventBinding_)
+            // {
+            //     // Assuming PushTick doesn't fail or handles its own errors
+            //     static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
+            // }
 
             auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
+            
+            // Reset frame memory pool at the end of the frame
+            FrameMemoryPool::Get().Reset();
+
             if (!tickResult.has_value())
             {
                 Log::Error("[ScriptEngine] ExecutionManager Tick failed: {}", static_cast<int>(tickResult.error()));
@@ -253,7 +271,7 @@ namespace AngelEngine
                  return eastl::unexpected(EngineError::GenericError);
             }
             
-            GenerateScriptPredefined(engine_.get(), AS_PREDEFINED_PATH);
+            GenerateScriptPredefined(engine_.get(), asPredefinedPath_);
             BroadcastEngineInitialized();
             
             return {};
@@ -263,11 +281,12 @@ namespace AngelEngine
         explicit ScriptEngine(AsEnginePtr as_engine, 
                               eastl::unique_ptr<IEngineComponentFactory> factory,
                               bool useJit,
-                              bool useAutoGC) :
+                              bool useAutoGC, std::filesystem::path asPredefinedPath) :
             jit_(nullptr),
             engine_(eastl::move(as_engine)),
             useJit_(useJit),
-            useAutoGC_(useAutoGC)
+            useAutoGC_(useAutoGC),
+            asPredefinedPath_(asPredefinedPath)
         {
             // Create components first to check config
             moduleLoader_ = factory->CreateModuleLoader();
@@ -385,6 +404,7 @@ namespace AngelEngine
 
         bool useJit_;
         bool useAutoGC_;
+        std::filesystem::path asPredefinedPath_;
 
         eastl::unique_ptr<IModuleLoader> moduleLoader_;
         eastl::unique_ptr<IExecutionManager> executionManager_;

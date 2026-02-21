@@ -28,7 +28,7 @@ namespace AngelEngine
     export class FileSystemScriptSourceProvider final : public IScriptSourceProvider
     {
     public:
-        explicit FileSystemScriptSourceProvider(ModuleLoaderConfig config)
+        explicit FileSystemScriptSourceProvider(EngineConfig config)
             : config_(std::move(config))
         {}
 
@@ -77,7 +77,7 @@ namespace AngelEngine
         }
 
     private:
-        ModuleLoaderConfig config_;
+        EngineConfig config_;
     };
 
     // --- Concrete Observer: Console Logger ---
@@ -132,7 +132,7 @@ namespace AngelEngine
     export class StandardComponentFactory final : public IEngineComponentFactory
     {
     public:
-        explicit StandardComponentFactory(ModuleLoaderConfig config)
+        explicit StandardComponentFactory(EngineConfig config)
             : config_(std::move(config))
         {}
 
@@ -144,7 +144,7 @@ namespace AngelEngine
 
         eastl::unique_ptr<IExecutionManager> CreateExecutionManager() override
         {
-            return eastl::make_unique<ExecutionManager>();
+            return eastl::make_unique<ExecutionManager>(config_.maxScriptExecutionTimeMs, config_.enableWatchdog);
         }
 
         eastl::unique_ptr<IReloadManager> CreateReloadManager() override
@@ -177,6 +177,6 @@ namespace AngelEngine
         }
 
     private:
-        ModuleLoaderConfig config_;
+        EngineConfig config_;
     };
 }

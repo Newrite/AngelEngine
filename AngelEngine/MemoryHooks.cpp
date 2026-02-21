@@ -1,11 +1,11 @@
-#include <new>
+﻿#include <new>
 #include <cstdint>
 #include <cstdio>
 #include <cstdarg>
 #include <mimalloc.h>
 
 // ------------------------------------------------------------------------
-// 1. СТАНДАРТНЫЕ C++ АЛЛОКАТОРЫ (Этого нам не хватало)
+// 1. STANDARD C++ ALLOCATORS
 // ------------------------------------------------------------------------
 void* operator new(size_t size) { return mi_malloc(size); }
 void* operator new[](size_t size) { return mi_malloc(size); }
@@ -13,7 +13,7 @@ void* operator new(size_t size, std::align_val_t al) { return mi_malloc_aligned(
 void* operator new[](size_t size, std::align_val_t al) { return mi_malloc_aligned(size, static_cast<size_t>(al)); }
 
 // ------------------------------------------------------------------------
-// 2. EASTL АЛЛОКАТОРЫ
+// 2. EASTL ALLOCATORS
 // ------------------------------------------------------------------------
 void* operator new[](size_t size, const char* /*name*/, int /*flags*/, unsigned /*debugFlags*/, const char* /*file*/, int /*line*/) {
     return mi_malloc(size);
@@ -24,7 +24,7 @@ void* operator new[](size_t size, size_t alignment, size_t /*alignmentOffset*/, 
 }
 
 // ------------------------------------------------------------------------
-// 3. ГЛОБАЛЬНЫЕ ДЕАЛЛОКАТОРЫ
+// 3. GLOBAL DEALLOCATORS
 // ------------------------------------------------------------------------
 void operator delete(void* p) noexcept { mi_free(p); }
 void operator delete[](void* p) noexcept { mi_free(p); }
@@ -34,7 +34,7 @@ void operator delete(void* p, std::align_val_t) noexcept { mi_free(p); }
 void operator delete[](void* p, std::align_val_t) noexcept { mi_free(p); }
 
 // ------------------------------------------------------------------------
-// 4. EASTL СОВМЕСТИМОСТЬ
+// 4. EASTL COMPATIBILITY
 // ------------------------------------------------------------------------
 namespace EA
 {

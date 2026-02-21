@@ -92,11 +92,17 @@ namespace AngelEngine
 
     // --- Configuration Structures ---
 
-    export struct ModuleLoaderConfig final
+    export struct EngineConfig final
     {
-        const std::filesystem::path scriptsPathStd;
-        const std::filesystem::path scriptsPathMod;
+        std::filesystem::path scriptsPathStd;
+        std::filesystem::path scriptsPathMod;
+        std::filesystem::path asPredefinedPath;
+        
         bool enableAutoReload = false;
+        bool enableWatchdog = true;
+        bool enableAutoGC = false;
+        bool enableUseJIT = false;
+        int64_t maxScriptExecutionTimeMs = 1000;
     };
     
     // --- String Hashing (Compile-Time & Runtime) ---

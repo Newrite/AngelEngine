@@ -144,13 +144,13 @@ target("AngelScript")
 target("AngelEngine")
     set_kind("static")
 
-    add_packages("mimalloc")
+    add_packages("mimalloc", { public = true })
     add_packages("eastl", { public = true })
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")
 
-    add_files("AngelEngine/*.cpp|EASTL_compat.cpp", { public = true })
-    add_files("AngelEngine/EASTL_compat.cpp")
+    add_files("AngelEngine/*.cpp|MemoryHooks.cpp", { public = true })
+    add_files("AngelEngine/MemoryHooks.cpp")
 
     add_files("AngelEngine/Addons/**.cpp", {
         cxflags = "-Wno-unused-but-set-variable"

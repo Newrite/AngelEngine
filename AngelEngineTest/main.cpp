@@ -269,17 +269,22 @@ int main() {
     AngelEngine::ConsoleEngineListener listener;
 
     // Configuration
-    ModuleLoaderConfig config {
+    EngineConfig config {
         .scriptsPathStd = fs::absolute("angelscripts/std"),
         .scriptsPathMod = fs::absolute("angelscripts/mods"),
-        .enableAutoReload = true
+        .asPredefinedPath = fs::absolute("angelscripts/as.predefined"),
+        .enableAutoReload = true,
+        .enableUseJIT = false,
+        .enableAutoGC = false,
+        .enableWatchdog = true,
+        .maxScriptExecutionTimeMs = 1000
     };
 
     // Factory
     auto factory = eastl::make_unique<StandardComponentFactory>(config);
 
     // Engine
-    auto engineResult = ScriptEngine::MakeEngine(std::move(factory), false);
+    auto engineResult = ScriptEngine::MakeEngine(std::move(factory), config.asPredefinedPath, config.enableUseJIT, config.enableAutoGC);
     if (!engineResult.has_value())
     {
         std::println(stderr, "Failed to create ScriptEngine");

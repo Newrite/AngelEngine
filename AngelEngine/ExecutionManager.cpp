@@ -31,11 +31,9 @@ namespace AngelEngine
     public:
         using PtrType = eastl::unique_ptr<ExecutionManager>;
         using ContextManagerPtr = eastl::unique_ptr<CContextMgr>;
+        
 
-        // Script execution time limit per frame (protection against while true)
-        static constexpr long long MAX_SCRIPT_EXEC_TIME_MS = 1000;
-
-        explicit ExecutionManager()
+        explicit ExecutionManager(const int64_t maxScriptExecutionTimeMs, const bool enableWatchdog) :   maxScriptExecutionTimeMs_(maxScriptExecutionTimeMs), enableWatchdog_(enableWatchdog)
         {
             Init();
         }
@@ -208,9 +206,17 @@ namespace AngelEngine
 
             if (ctx)
             {
-                // Set Watchdog for EVERY context requested (including those for events)
-                int r = ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
-                if (r < 0) Log::Error("[ExecutionManager] Failed to set line callback: {}", r);
+                
+                ExecutionManager* self = static_cast<ExecutionManager*>(param);
+                
+                int r;
+                
+                if (self->enableWatchdog_)
+                {
+                    // Set Watchdog for EVERY context requested (including those for events)
+                    r = ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+                    if (r < 0) Log::Error("[ExecutionManager] Failed to set line callback: {}", r);
+                }
 
                 r = ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
                 if (r < 0) Log::Error("[ExecutionManager] Failed to set exception callback: {}", r);
@@ -283,13 +289,13 @@ namespace AngelEngine
                 // (Защита от "шальной пули" из-за Race Condition)
                 auto elapsed = GetSystemTimeMs() - self->executionStartTimeMs_.load(eastl::memory_order_relaxed);
 
-                if (elapsed > MAX_SCRIPT_EXEC_TIME_MS)
+                if (elapsed > self->maxScriptExecutionTimeMs_)
                 {
                     // Сбрасываем таймер для следующих скриптов в очереди
                     self->executionStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
 
                     Log::Error("[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
-                               MAX_SCRIPT_EXEC_TIME_MS);
+                               self->maxScriptExecutionTimeMs_);
 
                     const char* section = "";
                     int line = ctx->GetLineNumber(0, 0, &section);
@@ -435,7 +441,7 @@ namespace AngelEngine
                     if (executionDepth_.load(eastl::memory_order_acquire) > 0)
                     {
                         auto elapsed = GetSystemTimeMs() - executionStartTimeMs_.load(eastl::memory_order_relaxed);
-                        if (elapsed > MAX_SCRIPT_EXEC_TIME_MS)
+                        if (elapsed > maxScriptExecutionTimeMs_)
                         {
                             abortRequested_.store(true, eastl::memory_order_release);
                         }
@@ -446,6 +452,9 @@ namespace AngelEngine
 
         ContextManagerPtr contextMgr_;
         std::recursive_mutex mutex_{};
+        
+        int64_t maxScriptExecutionTimeMs_;
+        bool enableWatchdog_;
 
         // Context Pool
         eastl::vector<asIScriptContext*> contextPool_;
