@@ -252,6 +252,7 @@ namespace AngelEngine
         virtual eastl::unique_ptr<IBindingManager> CreateBindingManager() = 0;
         virtual eastl::unique_ptr<IEventManager> CreateEventManager() = 0;
         virtual eastl::unique_ptr<IScriptWatcher> CreateScriptWatcher() = 0;
+        virtual EngineConfig GetEngineConfig() = 0;
     };
     
     export struct IEngineListener

@@ -4,7 +4,8 @@ module;
 #include <mutex>
 #include <format>
 
-#include <as_jit.h>
+// ЗАМЕНИЛИ <as_jit.h> на <angelsea.hpp>
+#include <angelsea.hpp>
 #include <angelscript.h>
 
 #include <EASTL/string.h>
@@ -45,8 +46,8 @@ namespace AngelEngine
     public:
         using AsEnginePtr = eastl::unique_ptr<asIScriptEngine, AngelScriptDeleter>;
         using PtrType = eastl::unique_ptr<ScriptEngine>;
-        
-        static eastl::expected<PtrType, EngineError> MakeEngine(eastl::unique_ptr<IEngineComponentFactory> factory, std::filesystem::path asPredefinedPath, bool useJit = true, bool useAutoGC = false)
+
+        static eastl::expected<PtrType, EngineError> MakeEngine(eastl::unique_ptr<IEngineComponentFactory> factory)
         {
             asSetGlobalMemoryFunctions(EngineAlloc, EngineFree);
             asIScriptEngine* rawEngine = asCreateScriptEngine();
@@ -57,15 +58,12 @@ namespace AngelEngine
             }
 
             AsEnginePtr engine(rawEngine);
-            
-            auto scriptEngine = eastl::unique_ptr<ScriptEngine>(new ScriptEngine(
-                eastl::move(engine), 
-                eastl::move(factory),
-                useJit,
-                useAutoGC, 
-                asPredefinedPath
+
+            auto scriptEngine = eastl::unique_ptr<ScriptEngine>( new ScriptEngine (
+                eastl::move(engine),
+                eastl::move(factory)
             ));
-            
+
             return scriptEngine;
         }
 
@@ -97,15 +95,13 @@ namespace AngelEngine
             int r = engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
             if (r < 0) Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
         }
-        
+
         void PushTick(float deltaTime)
         {
             std::scoped_lock lock(mutex_);
-            
-            // Push Tick Event to Channel
+
             if (eventBinding_)
             {
-                // Assuming PushTick doesn't fail or handles its own errors
                 static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
             }
         }
@@ -113,27 +109,24 @@ namespace AngelEngine
         eastl::expected<void, EngineError> Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
-            
-            // Check for auto-reload
+
             if (scriptWatcher_ && scriptWatcher_->CheckAndResetReloadFlag())
             {
                 auto reloadResult = HotReload();
                 if (!reloadResult.has_value())
                 {
-                    Log::Error("[ScriptEngine] Auto-reload failed with code: {}", static_cast<int>(reloadResult.error()));
+                    Log::Error("[ScriptEngine] Auto-reload failed with code: {}",
+                               static_cast<int>(reloadResult.error()));
                 }
             }
             
-            // Push Tick Event to Channel
-            // if (eventBinding_)
-            // {
-            //     // Assuming PushTick doesn't fail or handles its own errors
-            //     static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
-            // }
+            if (eventBinding_)
+            {
+                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
+            }
 
             auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
-            
-            // Reset frame memory pool at the end of the frame
+
             FrameMemoryPool::Get().Reset();
 
             if (!tickResult.has_value())
@@ -141,7 +134,7 @@ namespace AngelEngine
                 Log::Error("[ScriptEngine] ExecutionManager Tick failed: {}", static_cast<int>(tickResult.error()));
                 return eastl::unexpected(EngineError::GenericError);
             }
-            
+
             return {};
         }
 
@@ -158,7 +151,7 @@ namespace AngelEngine
 
             return {};
         }
-        
+
         eastl::expected<void, EngineError> RunMod(const eastl::string& modName) override
         {
             std::scoped_lock lock(mutex_);
@@ -166,7 +159,8 @@ namespace AngelEngine
             auto resultRunMod = executionManager_->RunMod(engine_.get(), modName);
             if (!resultRunMod.has_value())
             {
-                Log::Error("[ScriptEngine] Failed to run mod {}: {}", modName.c_str(), static_cast<int>(resultRunMod.error()));
+                Log::Error("[ScriptEngine] Failed to run mod {}: {}", modName.c_str(),
+                           static_cast<int>(resultRunMod.error()));
                 return eastl::unexpected(EngineError::FailRunMods);
             }
 
@@ -183,7 +177,8 @@ namespace AngelEngine
 
             if (!resultCompileMods.has_value())
             {
-                Log::Error("[ScriptEngine] Failed to compile all mods: {}", static_cast<int>(resultCompileMods.error()));
+                Log::Error("[ScriptEngine] Failed to compile all mods: {}",
+                           static_cast<int>(resultCompileMods.error()));
                 return eastl::unexpected(EngineError::FailCompileMods);
             }
 
@@ -193,8 +188,9 @@ namespace AngelEngine
         eastl::expected<void, EngineError> HotReload() const override
         {
             BroadcastHotReloadStarted();
-            
-            auto resultHotReload = reloadManager_->ReloadScripts(engine_.get(), moduleLoader_.get(), executionManager_.get(), eventManager_.get());
+
+            auto resultHotReload = reloadManager_->ReloadScripts(engine_.get(), moduleLoader_.get(),
+                                                                 executionManager_.get(), eventManager_.get());
             BroadcastHotReloadFinished();
 
             if (!resultHotReload.has_value())
@@ -202,10 +198,10 @@ namespace AngelEngine
                 Log::Error("[ScriptEngine] Hot reload failed: {}", static_cast<int>(resultHotReload.error()));
                 return eastl::unexpected(EngineError::FailHotReload);
             }
-            
+
             return {};
         }
-        
+
         void AddBinding(IScriptBinding* binding) const override
         {
             bindingManager_->AddBinding(binding);
@@ -219,11 +215,11 @@ namespace AngelEngine
         IReloadManager* GetReloadManager() const override { return reloadManager_.get(); }
         ISaveLoadManager* GetSaveLoadManager() const override { return saveLoadManager_.get(); }
         asIScriptEngine* GetEngine() const override { return engine_.get(); }
-        
+
         eastl::expected<void, EngineError> InitializeEngine()
         {
             int r = engine_->SetMessageCallback(asFUNCTION(MessageCallback), this, asCALL_CDECL);
-            if (r < 0) 
+            if (r < 0)
             {
                 Log::Error("[ScriptEngine] Failed to set message callback: {}", r);
                 return eastl::unexpected(EngineError::GenericError);
@@ -240,14 +236,36 @@ namespace AngelEngine
                 return eastl::unexpected(EngineError::CreateAngelScriptContextFailed);
             }
 
-            if (useJit_)
+            // --- ИНИЦИАЛИЗАЦИЯ ANGELSEA JIT ---
+            if (engine_config_.enableUseJIT)
             {
-                jit_ = eastl::make_unique<asCJITCompiler>();
                 engine_->SetEngineProperty(asEP_INCLUDE_JIT_INSTRUCTIONS, 1);
-                engine_->SetJITCompiler(jit_.get());
+                engine_->SetEngineProperty(asEP_JIT_INTERFACE_VERSION, 2); // Обязательно для Angelsea
+
+                // Если Watchdog будет отключен, здесь можно будет поставить 1 для максимальной скорости
+                Log::Info("Watch dog is: {}", engine_config_.enableWatchdog);
+                engine_->SetEngineProperty(asEP_BUILD_WITHOUT_LINE_CUES, engine_config_.enableWatchdog ? 0 : 1);
+
+                jitConfig_ = eastl::make_unique<angelsea::JitConfig>();
+
+                // Для наших тестов производительности мы хотим, чтобы JIT компилировал функции сразу (AOT-style), 
+                // а не ждал, пока они "прогреются".
+                jitConfig_->triggers.hits_before_func_compile = 0;
+
+                jit_ = eastl::make_unique<angelsea::Jit>(*jitConfig_, *engine_);
+
+                r = engine_->SetJITCompiler(jit_.get());
+                if (r < 0)
+                {
+                    Log::Error("[ScriptEngine] Failed to attach Angelsea JIT Compiler: {}", r);
+                }
+                else
+                {
+                    Log::Info("[ScriptEngine] Angelsea JIT Compiler successfully attached!");
+                }
             }
 
-            if (!useAutoGC_)
+            if (!engine_config_.enableAutoGC)
             {
                 engine_->SetEngineProperty(asEP_AUTO_GARBAGE_COLLECT, 0);
             }
@@ -255,42 +273,40 @@ namespace AngelEngine
             engine_->SetEngineProperty(asEP_PROPERTY_ACCESSOR_MODE, 2);
             engine_->SetEngineProperty(asEP_DISALLOW_VALUE_ASSIGN_FOR_REF_TYPE, 1);
             engine_->SetEngineProperty(asEP_REQUIRE_ENUM_SCOPE, 1);
+            engine_->SetEngineProperty(asEP_MAX_NESTED_CALLS, 100);
 
             auto result = bindingManager_->RegisterStandardAddons(engine_.get());
-            if (!result.has_value()) 
+            if (!result.has_value())
             {
                 Log::Error("[ScriptEngine] Failed to register standard addons.");
                 return eastl::unexpected(EngineError::GenericError);
             }
-            
+
             executionManager_->RegisterThreadSupport(engine_.get());
 
             auto bindResult = BindAll();
             if (!bindResult.has_value())
             {
-                 return eastl::unexpected(EngineError::GenericError);
+                return eastl::unexpected(EngineError::GenericError);
             }
-            
-            GenerateScriptPredefined(engine_.get(), asPredefinedPath_);
+
+            GenerateScriptPredefined(engine_.get(), engine_config_.asPredefinedPath);
             BroadcastEngineInitialized();
-            
+
             return {};
         }
 
     private:
-        explicit ScriptEngine(AsEnginePtr as_engine, 
-                              eastl::unique_ptr<IEngineComponentFactory> factory,
-                              bool useJit,
-                              bool useAutoGC, std::filesystem::path asPredefinedPath) :
+        explicit ScriptEngine(AsEnginePtr as_engine,
+                              eastl::unique_ptr<IEngineComponentFactory> factory) :
             jit_(nullptr),
-            engine_(eastl::move(as_engine)),
-            useJit_(useJit),
-            useAutoGC_(useAutoGC),
-            asPredefinedPath_(asPredefinedPath)
+            jitConfig_(nullptr),
+            engine_(eastl::move(as_engine))
         {
-            // Create components first to check config
-            moduleLoader_ = factory->CreateModuleLoader();
             
+            engine_config_ = factory->GetEngineConfig();
+            
+            moduleLoader_ = factory->CreateModuleLoader();
             executionManager_ = factory->CreateExecutionManager();
             reloadManager_ = factory->CreateReloadManager();
             saveLoadManager_ = factory->CreateSaveLoadManager();
@@ -298,7 +314,6 @@ namespace AngelEngine
             eventManager_ = factory->CreateEventManager();
 
             eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
-            
             scriptWatcher_ = factory->CreateScriptWatcher();
         }
 
@@ -334,12 +349,12 @@ namespace AngelEngine
         {
             if (eventBinding_)
             {
-                 auto result = bindingManager_->Bind(engine_.get(), eventBinding_.get());
-                 if (!result.has_value()) 
-                 {
-                     Log::Error("[ScriptEngine] Failed to bind EventBinding.");
-                     return result;
-                 }
+                auto result = bindingManager_->Bind(engine_.get(), eventBinding_.get());
+                if (!result.has_value())
+                {
+                    Log::Error("[ScriptEngine] Failed to bind EventBinding.");
+                    return result;
+                }
             }
 
             auto result = bindingManager_->BindAll(engine_.get());
@@ -350,7 +365,7 @@ namespace AngelEngine
             }
             return {};
         }
-        
+
         void Bind(IScriptBinding* binding)
         {
             auto result = bindingManager_->Bind(engine_.get(), binding);
@@ -362,7 +377,8 @@ namespace AngelEngine
 
         void BroadcastEngineInitialized() const
         {
-            for (auto* listener : listeners_) listener->OnEngineInitialized(engine_.get(), bindingManager_.get(), moduleLoader_.get(), executionManager_.get());
+            for (auto* listener : listeners_) listener->OnEngineInitialized(
+                engine_.get(), bindingManager_.get(), moduleLoader_.get(), executionManager_.get());
         }
 
         void BroadcastCompilationStarted() const
@@ -384,7 +400,7 @@ namespace AngelEngine
         {
             for (auto* listener : listeners_) listener->OnHotReloadFinished(engine_.get());
         }
-        
+
         void BroadcastAddBinding(IScriptBinding* binding) const
         {
             for (auto* listener : listeners_) listener->OnAddBinding(engine_.get(), binding);
@@ -396,15 +412,15 @@ namespace AngelEngine
         }
 
     private:
-        eastl::unique_ptr<asCJITCompiler> jit_;
-        AsEnginePtr engine_; 
+        // --- ANGELSEA JIT POINTERS ---
+        eastl::unique_ptr<angelsea::Jit> jit_;
+        eastl::unique_ptr<angelsea::JitConfig> jitConfig_;
+
+        AsEnginePtr engine_;
+        EngineConfig engine_config_;
 
         std::mutex mutex_;
         eastl::vector<IEngineListener*> listeners_;
-
-        bool useJit_;
-        bool useAutoGC_;
-        std::filesystem::path asPredefinedPath_;
 
         eastl::unique_ptr<IModuleLoader> moduleLoader_;
         eastl::unique_ptr<IExecutionManager> executionManager_;
@@ -412,10 +428,8 @@ namespace AngelEngine
         eastl::unique_ptr<ISaveLoadManager> saveLoadManager_;
         eastl::unique_ptr<IBindingManager> bindingManager_;
         eastl::unique_ptr<IEventManager> eventManager_;
-        
+
         eastl::unique_ptr<IScriptBinding> eventBinding_;
-        
-        // Watcher
         eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
     };
 }

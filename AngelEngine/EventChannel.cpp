@@ -146,16 +146,29 @@ namespace AngelEngine
         
         void Clear() override
         {
-            while (lock_.test_and_set(eastl::memory_order_acquire));
-            
-            if constexpr (sizeof...(Args) > 0) {
-                ClearImpl(eastl::make_index_sequence<sizeof...(Args)>{});
+            // Локальный вектор для безопасного освобождения вне критической секции
+            eastl::vector<asIScriptFunction*> toRelease;
+    
+            {
+                while (lock_.test_and_set(eastl::memory_order_acquire));
+        
+                if constexpr (sizeof...(Args) > 0) {
+                    ClearImpl(eastl::make_index_sequence<sizeof...(Args)>{});
+                }
+                count_ = 0;
+        
+                // Переносим данные в локальный список и очищаем основной вектор под локом
+                toRelease = eastl::move(subscribers_);
+                subscribers_.clear();
+        
+                lock_.clear(eastl::memory_order_release);
             }
-            count_ = 0;
-            
-            for(auto* f : subscribers_) f->Release();
-            subscribers_.clear();
-            lock_.clear(eastl::memory_order_release);
+    
+            // Теперь безопасно вызываем Release. Даже если это вызовет цепочку разрушений,
+            // наш лок уже свободен, и дедлока не будет.
+            for(auto* f : toRelease) {
+                if (f) f->Release();
+            }
         }
 
     private:

@@ -1,11 +1,6 @@
 ﻿module;
 
 #include <angelscript.h>
-#include <vector>
-#include <string>
-#include <cstring>
-#include <cstdint>
-#include <print>
 #include <format>
 
 #include <EASTL/vector.h>
@@ -78,10 +73,10 @@ namespace AngelEngine
                 }
             }
 
-            // 1. Handle std::string
+            // 1. Handle eastl::string
             if (typeId == stringTypeId_)
             {
-                std::string* str = static_cast<std::string*>(ptr);
+                eastl::string* str = static_cast<eastl::string*>(ptr);
                 uint32_t len = static_cast<uint32_t>(str->length());
                 stream_->Write(&len, sizeof(len));
                 if (len > 0)
@@ -162,13 +157,13 @@ namespace AngelEngine
                 }
             }
 
-            // 1. Handle std::string
+            // 1. Handle eastl::string
             if (typeId == stringTypeId_)
             {
                 uint32_t len = 0;
                 if (stream_->Read(&len, sizeof(len)) < 0) return false;
                 
-                std::string* str = static_cast<std::string*>(ptr);
+                eastl::string* str = static_cast<eastl::string*>(ptr);
                 str->resize(len);
                 if (len > 0)
                 {

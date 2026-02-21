@@ -175,6 +175,11 @@ namespace AngelEngine
             }
             return nullptr;
         }
+        
+        EngineConfig GetEngineConfig() override
+        {
+            return config_;
+        }
 
     private:
         EngineConfig config_;

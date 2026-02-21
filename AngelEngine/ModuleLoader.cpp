@@ -6,6 +6,14 @@ module;
 #include <filesystem>
 #include <angelscript.h>
 
+// Подключаем стандартные потоки для чтения файлов в память
+#include <fstream>
+#include <sstream>
+
+// Подключаем заголовочный файл aspromise для парсера co_await
+// (Убедись, что путь совпадает с тем, куда ты положил promise.hpp)
+#include "scriptpromise/aspromise.hpp"
+
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 #include <EASTL/map.h>
@@ -44,6 +52,8 @@ namespace AngelEngine
 
         const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const override
         {
+            // Здесь мы добавили лок в прошлом шаге для потокобезопасности
+            std::scoped_lock lock(mutex_); 
             auto it = saveable_vars_cache_.find(modName);
             if (it != saveable_vars_cache_.end())
             {
@@ -91,8 +101,36 @@ namespace AngelEngine
 
             for (const auto& scriptPath : scripts)
             {
-                // We use AddSectionFromFile because the provider currently returns paths.
-                int r = builder_->AddSectionFromFile(scriptPath.string().c_str());
+                // 1. Читаем исходный код скрипта из файла в память
+                std::ifstream file(scriptPath);
+                if (!file.is_open())
+                {
+                    Log::Error("[ScriptEngine] Failed to open script file: {}", scriptPath.string().c_str());
+                    return eastl::unexpected(ModuleLoaderError::LoadScriptError);
+                }
+
+                std::stringstream buffer;
+                buffer << file.rdbuf();
+                std::string code = buffer.str();
+
+                // 2. Препроцессинг PROMISE (магия co_await)
+                size_t codeSize = code.size();
+                
+                // Функция AsGeneratePromiseEntrypoints выделит новую память под измененный код.
+                // Так как мы уже переопределили глобальные asAllocMem/asFreeMem на mimalloc в ScriptEngine,
+                // мы можем безопасно использовать дефолтные параметры аллокатора в функции.
+                char* processedCode = AsGeneratePromiseEntrypoints(
+                    code.c_str(), 
+                    &codeSize
+                );
+
+                // 3. Загружаем обработанный код в CScriptBuilder.
+                // Мы передаем scriptPath как имя секции, чтобы ошибки компиляции AS указывали на реальный файл.
+                int r = builder_->AddSectionFromMemory(scriptPath.string().c_str(), processedCode, static_cast<unsigned int>(codeSize), 0);
+                
+                // 4. Обязательно освобождаем память, выделенную генератором
+                asFreeMem(processedCode);
+
                 if (r < 0)
                 {
                     Log::Error("[ScriptEngine] Failed to add file: {} with AS code: {}", scriptPath.string().c_str(), r);
@@ -140,51 +178,14 @@ namespace AngelEngine
 
             // Parse metadata for saveable variables
             saveable_vars_cache_.erase(modName); // Clear cache for this module
-            asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
+            asIScriptModule* mod = builder_->GetModule();
             if (mod)
             {
                 int globalVarCount = mod->GetGlobalVarCount();
                 for (int i = 0; i < globalVarCount; ++i)
                 {
-                    // GetMetadataForVar returns a std::vector<std::string>
-                    // Note: CScriptBuilder is not part of the standard AngelScript interface, so we assume it's available here as a member.
-                    // However, GetMetadataForVar is a method of CScriptBuilder, not asIScriptModule.
-                    // We need to use the builder instance to get metadata.
-                    // The builder state might have changed if we are building multiple modules sequentially?
-                    // CScriptBuilder::StartNewModule resets the builder.
-                    // So we can use builder_->GetMetadataForVar(i) because we just built this module.
-                    
-                    // Wait, CScriptBuilder::GetMetadataForVar takes the variable index in the module.
-                    // But we need to be careful if the builder state is consistent with the module we just built.
-                    // Yes, we just called BuildModule(), so the builder should be in the correct state.
-
-                    // Wait, the original code was:
-                    // std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
-                    // But builder_->GetMetadataForVar(i) might not be correct if the builder doesn't track variable indices directly or if they differ.
-                    // Actually CScriptBuilder usually stores metadata mapped by declaration ID or name.
-                    // Let's assume the original code was correct about using builder_->GetMetadataForVar(i).
-                    
-                    // However, we should check if the variable index 'i' from mod->GetGlobalVarCount() matches what the builder expects.
-                    // CScriptBuilder usually doesn't expose GetMetadataForVar(int varIdx). It usually exposes GetMetadataForVar(const char* varName) or similar.
-                    // Let's check the original code again.
-                    // original: std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
-                    // If the user has a custom CScriptBuilder that supports this, we keep it.
-                    
-                    // But wait, the original code had:
-                    // asIScriptModule* mod = builder_->GetModule();
-                    // This is safer than engine->GetModule.
-                    
-                    // Let's revert to using builder_->GetModule() to be safe and consistent with original code.
-                    
-                    // Re-reading original code:
-                    // asIScriptModule* mod = builder_->GetModule();
-                    // if (mod) { ... }
-                    
-                    // I will stick to that.
-
                     std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
                     
-                    // Check if any of the metadata strings is "Save"
                     bool isSaveable = false;
                     for (const auto& meta : metadataList)
                     {
@@ -216,7 +217,7 @@ namespace AngelEngine
             return {};
         }
 
-        std::mutex mutex_;
+        mutable std::mutex mutex_;
         eastl::vector<eastl::string> loaded_modules_;
         mutable eastl::map<eastl::string, eastl::vector<eastl::string>> saveable_vars_cache_;
         eastl::unique_ptr<CScriptBuilder> builder_;

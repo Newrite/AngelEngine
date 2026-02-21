@@ -2,17 +2,14 @@ module;
 
 #include <EABase/eabase.h>
 #include <EASTL/expected.h>
-#include <EASTL/string.h>
 #include <EASTL/vector.h>
 
-#include <asbind20/asbind.hpp>
 #include <angelscript.h>
-#include <print>
-#include <string>
 
 #include <scripteastlstring/scripteastlstring.h>
 #include <scriptarray.h>
 #include <scriptedictionary/scriptdictionary.h>
+#include "scriptpromise/aspromise.hpp"
 #include <scriptmath.h>
 #include <scriptfile.h>
 #include <scriptany.h>
@@ -48,6 +45,7 @@ namespace AngelEngine
             RegisterScriptHandle(engine);
             RegisterScriptWeakRef(engine);
             RegisterEASTLStringUtils(engine);
+            AsDirectPromise::Register(engine);
             
             return {};
         }

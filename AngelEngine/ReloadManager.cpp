@@ -24,6 +24,9 @@ namespace AngelEngine
 
             executionManager->AbortAll();
             eventManager->ClearAll();
+            
+            int r = engine->GarbageCollect();
+            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect failed with code: {} while reload scripts", r);
 
             executionManager->Renew();
             
