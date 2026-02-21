@@ -8,6 +8,7 @@
 export module AngelEngineTest.EventsBinding;
 
 import AngelEngine.Interfaces;
+import AngelEngine.EventChannel;
 
 namespace AngelEngineTest
 {
@@ -22,6 +23,20 @@ namespace AngelEngineTest
     public:
         explicit TestEventBinding(AngelEngine::IEventManager* eventManager) : eventManager_(eventManager)
         {
+            if (eventManager_)
+            {
+                eventManager_->RegisterChannel(EventsName::CustomEvent, &customEventChannel_);
+                eventManager_->RegisterChannel(EventsName::DeferredEvent, &deferredEventChannel_);
+            }
+        }
+        
+        ~TestEventBinding() override
+        {
+            if (eventManager_)
+            {
+                eventManager_->UnregisterChannel(EventsName::CustomEvent);
+                eventManager_->UnregisterChannel(EventsName::DeferredEvent);
+            }
         }
 
         void Bind(asIScriptEngine* engine) override
@@ -49,16 +64,24 @@ namespace AngelEngineTest
         void SubscribeCustomEvent(asIScriptFunction* callback)
         {
             if (!callback) return;
-            if (eventManager_) eventManager_->Subscribe(EventsName::CustomEvent, callback);
+            customEventChannel_.AddSubscriber(callback);
         }
         
         void SubscribeDeferredEvent(asIScriptFunction* callback)
         {
             if (!callback) return;
-            if (eventManager_) eventManager_->Subscribe(EventsName::DeferredEvent, callback);
+            deferredEventChannel_.AddSubscriber(callback);
         }
+
+        // Public accessors for pushing events
+        void PushCustomEvent(int val1, float val2) { customEventChannel_.Enqueue(val1, val2); }
+        void PushDeferredEvent() { deferredEventChannel_.Enqueue(); }
     
     private:
         AngelEngine::IEventManager* eventManager_;
+        
+        // Channels
+        AngelEngine::EventChannel<int, float> customEventChannel_;
+        AngelEngine::EventChannel<> deferredEventChannel_;
     };
 }

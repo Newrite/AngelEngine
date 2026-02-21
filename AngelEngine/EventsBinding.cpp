@@ -8,6 +8,7 @@
 export module AngelEngine.EventsBinding;
 
 import AngelEngine.Interfaces;
+import AngelEngine.EventChannel;
 
 namespace AngelEngine
 {
@@ -23,6 +24,23 @@ namespace AngelEngine
     public:
         explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager)
         {
+            // Register channels
+            if (eventManager_)
+            {
+                eventManager_->RegisterChannel(EventsName::OnTick, &tickChannel_);
+                eventManager_->RegisterChannel(EventsName::OnLoad, &loadChannel_);
+                eventManager_->RegisterChannel(EventsName::OnSave, &saveChannel_);
+            }
+        }
+        
+        ~EventBinding() override
+        {
+            if (eventManager_)
+            {
+                eventManager_->UnregisterChannel(EventsName::OnTick);
+                eventManager_->UnregisterChannel(EventsName::OnLoad);
+                eventManager_->UnregisterChannel(EventsName::OnSave);
+            }
         }
 
         void Bind(asIScriptEngine* engine) override
@@ -35,7 +53,7 @@ namespace AngelEngine
         void SubscribeTick(asIScriptFunction* callback)
         {
             if (!callback) return;
-            if (eventManager_) eventManager_->Subscribe(EventsName::OnTick, callback);
+            tickChannel_.AddSubscriber(callback);
         }
         
         void BindTick(asIScriptEngine* engine)
@@ -54,7 +72,7 @@ namespace AngelEngine
         void SubscribeLoad(asIScriptFunction* callback)
         {
             if (!callback) return;
-            if (eventManager_) eventManager_->Subscribe(EventsName::OnLoad, callback);
+            loadChannel_.AddSubscriber(callback);
         }
         
         void BindLoad(asIScriptEngine* engine)
@@ -73,7 +91,7 @@ namespace AngelEngine
         void SubscribeSave(asIScriptFunction* callback)
         {
             if (!callback) return;
-            if (eventManager_) eventManager_->Subscribe(EventsName::OnSave, callback);
+            saveChannel_.AddSubscriber(callback);
         }
         
         void BindSave(asIScriptEngine* engine)
@@ -81,15 +99,25 @@ namespace AngelEngine
             engine->RegisterFuncdef("void SaveCallback()");
 
             int r = engine->RegisterGlobalFunction(
-                "void SubscribeLoad(SaveCallback@+)", 
+                "void SubscribeSave(SaveCallback@+)",
                 asMETHOD(EventBinding, SubscribeSave), 
                 asCALL_THISCALL_ASGLOBAL, 
                 this
             );
             if (r < 0) std::println(stderr, "[EventBinding] Failed to register SubscribeSave. Code: {}", r);
         }
+
+        // Public accessors for pushing events
+        void PushTick(float dt) { tickChannel_.Enqueue(dt); }
+        void PushLoad() { loadChannel_.Enqueue(); }
+        void PushSave() { saveChannel_.Enqueue(); }
     
     private:
         IEventManager* eventManager_;
+        
+        // Channels
+        EventChannel<float> tickChannel_;
+        EventChannel<> loadChannel_;
+        EventChannel<> saveChannel_;
     };
 }

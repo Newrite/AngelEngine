@@ -289,7 +289,10 @@ int main() {
 
     // Bindings
     auto testBinding = eastl::make_unique<TestBinding>();
+    // We need to keep a pointer to the test event binding to push events
     auto eventsBinding = eastl::make_unique<AngelEngineTest::TestEventBinding>(engine->GetEventManager());
+    auto* eventsBindingPtr = eventsBinding.get();
+    
     // Manually bind because MakeEngine already called BindAll
     engine->AddBinding(testBinding.get());
     engine->AddBinding(eventsBinding.get());
@@ -464,11 +467,20 @@ int main() {
     // Direct Dispatch
     std::println("Testing Direct Dispatch...");
     
-    // Use ArgInjector to pass arguments
-    engine->GetEventManager()->DispatchDirect(engine->GetEngine(), AngelEngineTest::EventsName::CustomEvent, [](asIScriptContext* ctx) {
-        ctx->SetArgDWord(0, 123);
-        ctx->SetArgFloat(1, 3.14f);
-    });
+    // Use the binding helper to push events directly to the channel
+    eventsBindingPtr->PushCustomEvent(123, 3.14f);
+    
+    // We need to process deferred events to see the result, as all events are now deferred/channel-based
+    // But wait, the test expects "Direct Dispatch" to be immediate?
+    // The new architecture makes everything deferred via channels for performance.
+    // So we must Tick to process it.
+    
+    // However, the previous test logic assumed DispatchDirect was immediate.
+    // If we want immediate execution, we would need to manually process the channel.
+    // But let's stick to the engine flow: Push -> Tick.
+    
+    // Tick to process the event
+    engine->Tick(0.0f);
 
     // Verify Output
     bool foundEvent = false;
@@ -478,14 +490,17 @@ int main() {
             break;
         }
     }
-    TEST_ASSERT(foundEvent, "Direct dispatch event not received or output mismatch");
+    TEST_ASSERT(foundEvent, "Custom event not received or output mismatch");
     testBinding->capturedOutput.clear();
 
     // Deferred Dispatch
     std::println("Testing Deferred Dispatch...");
-    engine->GetEventManager()->DispatchDeferred(AngelEngineTest::EventsName::DeferredEvent);
+    eventsBindingPtr->PushDeferredEvent();
 
-    // Verify it didn't execute yet
+    // Verify it didn't execute yet (before Tick)
+    // Note: In the new architecture, Push enqueues to the channel.
+    // Execution happens in Tick.
+    // So checking before Tick is correct.
     bool foundDeferred = false;
     for (const auto& line : testBinding->capturedOutput) {
         if (line.find("Deferred Executed") != eastl::string::npos) {

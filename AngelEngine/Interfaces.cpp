@@ -3,7 +3,6 @@ module;
 #include <angelscript.h>
 #include <filesystem>
 
-
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 #include <EASTL/unique_ptr.h>
@@ -87,21 +86,15 @@ namespace AngelEngine
 
     // --- Pattern Interfaces ---
 
-    // Strategy: Decouples script discovery from file system
     export struct IScriptSourceProvider
     {
         virtual ~IScriptSourceProvider() = default;
-        // Returns root path for Std lib (used by CScriptBuilder include resolving)
         virtual std::filesystem::path GetStdLibPath() const = 0;
-        // Returns list of available Mod names
         virtual eastl::vector<eastl::string> GetAvailableMods() const = 0;
-        // Returns root path for a specific Mod
         virtual std::filesystem::path GetModPath(const eastl::string& modName) const = 0;
-        // Returns all script files (absolute paths) in a directory (recursive)
         virtual eastl::vector<std::filesystem::path> GetScriptFiles(const std::filesystem::path& rootPath) const = 0;
     };
 
-    // Strategy: Interface for external bindings
     export struct IScriptBinding
     {
         virtual ~IScriptBinding() = default;
@@ -119,34 +112,35 @@ namespace AngelEngine
         virtual const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const = 0;
     };
 
-    // Функция, которую передает пользователь (код Скайрима), 
-    // чтобы заполнить аргументы контекста перед его запуском.
-    export using ArgInjector = eastl::function<void(asIScriptContext*)>;
+    export struct IEventChannel
+    {
+        virtual ~IEventChannel() = default;
+        virtual void ProcessDeferred(asIScriptContext* ctx) = 0;
+        virtual void Clear() = 0;
+    };
 
     export struct IEventManager
     {
         virtual ~IEventManager() = default;
 
-        // Подписка из скрипта
-        virtual void Subscribe(uint32_t eventId, asIScriptFunction* callback) = 0;
+        virtual void RegisterChannel(uint32_t eventId, IEventChannel* channel) = 0;
+        virtual void UnregisterChannel(uint32_t eventId) = 0;
+        virtual IEventChannel* GetChannel(uint32_t eventId) const = 0;
         
-        // Очистка при перезагрузке (HotReload)
+        virtual void ProcessAllDeferred(asIScriptContext* sharedCtx) = 0;
         virtual void ClearAll() = 0;
-
-        // 1. Прямой вызов (мгновенно, блокирует поток, можно менять inout аргументы)
-        virtual void DispatchDirect(asIScriptEngine* engine, uint32_t eventId, const ArgInjector& argInjector = nullptr) = 0;
-
-        // 2. Отложенный вызов (добавляет в очередь на следующий Tick)
-        virtual void DispatchDeferred(uint32_t eventId, const ArgInjector& argInjector = nullptr) = 0;
-        
-        // Метод для ExecutionManager, чтобы забрать очередь отложенных событий
-        struct QueuedEvent {
-            asIScriptFunction* func;
-            ArgInjector argInjector;
-        };
-        virtual eastl::vector<QueuedEvent> PopDeferredEvents() = 0;
     };
-    
+
+    // Helper functions for EventChannel
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, float val) { ctx->SetArgFloat(argIndex, val); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, double val) { ctx->SetArgDouble(argIndex, val); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, int32_t val) { ctx->SetArgDWord(argIndex, static_cast<asDWORD>(val)); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, uint32_t val) { ctx->SetArgDWord(argIndex, val); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, int64_t val) { ctx->SetArgQWord(argIndex, static_cast<asQWORD>(val)); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, uint64_t val) { ctx->SetArgQWord(argIndex, val); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, bool val) { ctx->SetArgByte(argIndex, val); }
+    export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, void* val) { ctx->SetArgAddress(argIndex, val); }
+
     export struct IContextPooling
     {
         virtual ~IContextPooling() = default;
@@ -197,7 +191,6 @@ namespace AngelEngine
         virtual void AddBinding(IScriptBinding* binding) = 0;
     };
 
-    // Abstract Factory: Creates the family of engine components
     export struct IEngineComponentFactory
     {
         virtual ~IEngineComponentFactory() = default;
@@ -209,7 +202,6 @@ namespace AngelEngine
         virtual eastl::unique_ptr<IEventManager> CreateEventManager() = 0;
     };
     
-    // Observer: Listener for engine events
     export struct IEngineListener
     {
         virtual ~IEngineListener() = default;
@@ -219,7 +211,7 @@ namespace AngelEngine
         virtual void OnHotReloadStarted(asIScriptEngine* engine) {}
         virtual void OnHotReloadFinished(asIScriptEngine* engine) {}
         virtual void OnAddBinding(asIScriptEngine* engine, IScriptBinding* binding) {}
-        virtual void OnScriptMessage(asIScriptEngine* engine, const asSMessageInfo* msg) {} // Redirects AS logs
+        virtual void OnScriptMessage(asIScriptEngine* engine, const asSMessageInfo* msg) {} 
     };
     
     export struct IScriptEngineGetters
@@ -246,7 +238,6 @@ namespace AngelEngine
         virtual void CallGarbageCollectorFullCycle() = 0;
         virtual void CallGarbageColletorOneStep() = 0;
 
-        // Observer management
         virtual void AddListener(IEngineListener* listener) = 0;
         virtual void RemoveListener(IEngineListener* listener) = 0;
     };

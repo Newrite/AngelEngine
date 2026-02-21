@@ -93,10 +93,13 @@ namespace AngelEngine
         void Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
-            eventManager_->DispatchDeferred(EventsName::OnTick, [&](asIScriptContext* ctx)
+            
+            // Push Tick Event to Channel
+            if (eventBinding_)
             {
-                ctx->SetArgFloat(0, deltaTime);
-            });
+                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
+            }
+
             executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
         }
 

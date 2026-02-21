@@ -105,24 +105,18 @@ namespace AngelEngine
 
         void Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) override
         {
-            // 1. Retrieve deferred events
+            // 1. Process deferred events using a shared context
             if (eventManager)
             {
-                auto queuedEvents = eventManager->PopDeferredEvents();
-                for (const auto& ev : queuedEvents)
+                // Request a context for event processing
+                asIScriptContext* ctx = RequestContext(engine, nullptr);
+                if (ctx)
                 {
-                    // Add them to ContextMgr (they will run asynchronously, supporting Wait)
-                    asIScriptContext* ctx = contextMgr_->AddContext(engine, ev.func);
-                    if (ctx)
-                    {
-                        if (ev.argInjector) ev.argInjector(ctx);
-                        
-                        // Set callbacks for safety and debugging
-                        // Note: RequestContextCallback already sets LineCallback, but we set ExceptionCallback here too just in case
-                        ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
-                    }
-                    // Release the Ref we took when queuing
-                    ev.func->Release();
+                    // Process all deferred events across all channels
+                    eventManager->ProcessAllDeferred(ctx);
+                    
+                    // Return context to pool
+                    ReturnContext(engine, ctx, nullptr);
                 }
             }
 
@@ -201,6 +195,7 @@ namespace AngelEngine
             {
                 // Set Watchdog for EVERY context requested (including those for events)
                 ctx->SetLineCallback(asFUNCTION(LineCallback), this, asCALL_CDECL);
+                ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
             }
 
             return ctx;

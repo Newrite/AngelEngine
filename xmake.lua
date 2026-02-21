@@ -22,7 +22,7 @@ add_requires("eastl")
 -- Include Angel Script JIT
 includes("GitModules/AngelScript-JIT-Compiler")
 
-if is_mode("release") then
+if is_mode("release") or is_mode("releasedbg") then
     -- 1. Высший уровень абстракции xmake
     set_optimize("aggressive") -- Более агрессивно, чем "fastest". Включает -Ofast (GCC/Clang) или макс. оптимизацию MSVC
 
