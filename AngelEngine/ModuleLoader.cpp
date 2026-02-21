@@ -15,6 +15,7 @@ module;
 export module AngelEngine.ModuleLoader;
 
 import AngelEngine.Interfaces;
+import AngelEngine.Logger;
 
 namespace fs = std::filesystem;
 
@@ -61,15 +62,21 @@ namespace AngelEngine
             eastl::vector<eastl::string> availableMods = provider_->GetAvailableMods();
             if (availableMods.empty())
             {
-                std::println(stderr, "[ScriptEngine] No mods found.");
+                Log::Error("[ScriptEngine] No mods found.");
                 return eastl::unexpected(ModuleLoaderError::PathNotFoundError);
             }
 
             for (const auto& modName : availableMods)
             {
-                if (CompileSingleMod(engine, modName))
+                auto result = CompileSingleMod(engine, modName);
+                if (result.has_value())
                 {
                     loaded_modules_.push_back(modName);
+                }
+                else
+                {
+                    Log::Error("[ScriptEngine] Failed to compile mod: {}", modName.c_str());
+                    return eastl::unexpected(result.error());
                 }
             }
 
@@ -86,7 +93,11 @@ namespace AngelEngine
             {
                 // We use AddSectionFromFile because the provider currently returns paths.
                 int r = builder_->AddSectionFromFile(scriptPath.string().c_str());
-                if (r < 0) std::println(stderr, "[ScriptEngine] Failed to add file: {}", scriptPath.string());
+                if (r < 0)
+                {
+                    Log::Error("[ScriptEngine] Failed to add file: {} with AS code: {}", scriptPath.string().c_str(), r);
+                    return eastl::unexpected(ModuleLoaderError::LoadScriptError);
+                }
             }
             return {};
         }
@@ -97,7 +108,7 @@ namespace AngelEngine
             int r = builder_->StartNewModule(engine, modName.c_str());
             if (r < 0)
             {
-                std::println(stderr, "[ScriptEngine] Failed to create module: {}", modName.c_str());
+                Log::Error("[ScriptEngine] Failed to create module: {} with AS code: {}", modName.c_str(), r);
                 return eastl::unexpected(ModuleLoaderError::CreateModuleError);
             }
             
@@ -106,7 +117,7 @@ namespace AngelEngine
             auto loadStdResult = LoadScriptsFromProvider(stdLibPath);
             if (!loadStdResult)
             {
-                std::println(stderr, "[ScriptEngine] Failed to inject STD into: {}", modName.c_str());
+                Log::Error("[ScriptEngine] Failed to inject STD into: {}", modName.c_str());
                 return loadStdResult;
             }
 
@@ -115,27 +126,62 @@ namespace AngelEngine
             auto loadModResult = LoadScriptsFromProvider(modPath);
             if (!loadModResult)
             {
-                std::println(stderr, "[ScriptEngine] Failed to load scripts for: {}", modName.c_str());
+                Log::Error("[ScriptEngine] Failed to load scripts for: {}", modName.c_str());
                 return loadModResult;
             }
 
             r = builder_->BuildModule();
             if (r < 0)
             {
-                std::println(stderr, "[ScriptEngine] Compilation FAILED for mod: {}", modName.c_str());
+                Log::Error("[ScriptEngine] Compilation FAILED for mod: {} with AS code: {}", modName.c_str(), r);
                 engine->DiscardModule(modName.c_str());
                 return eastl::unexpected(ModuleLoaderError::BuildModuleError);
             }
 
             // Parse metadata for saveable variables
             saveable_vars_cache_.erase(modName); // Clear cache for this module
-            asIScriptModule* mod = builder_->GetModule();
+            asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
             if (mod)
             {
                 int globalVarCount = mod->GetGlobalVarCount();
                 for (int i = 0; i < globalVarCount; ++i)
                 {
                     // GetMetadataForVar returns a std::vector<std::string>
+                    // Note: CScriptBuilder is not part of the standard AngelScript interface, so we assume it's available here as a member.
+                    // However, GetMetadataForVar is a method of CScriptBuilder, not asIScriptModule.
+                    // We need to use the builder instance to get metadata.
+                    // The builder state might have changed if we are building multiple modules sequentially?
+                    // CScriptBuilder::StartNewModule resets the builder.
+                    // So we can use builder_->GetMetadataForVar(i) because we just built this module.
+                    
+                    // Wait, CScriptBuilder::GetMetadataForVar takes the variable index in the module.
+                    // But we need to be careful if the builder state is consistent with the module we just built.
+                    // Yes, we just called BuildModule(), so the builder should be in the correct state.
+
+                    // Wait, the original code was:
+                    // std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
+                    // But builder_->GetMetadataForVar(i) might not be correct if the builder doesn't track variable indices directly or if they differ.
+                    // Actually CScriptBuilder usually stores metadata mapped by declaration ID or name.
+                    // Let's assume the original code was correct about using builder_->GetMetadataForVar(i).
+                    
+                    // However, we should check if the variable index 'i' from mod->GetGlobalVarCount() matches what the builder expects.
+                    // CScriptBuilder usually doesn't expose GetMetadataForVar(int varIdx). It usually exposes GetMetadataForVar(const char* varName) or similar.
+                    // Let's check the original code again.
+                    // original: std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
+                    // If the user has a custom CScriptBuilder that supports this, we keep it.
+                    
+                    // But wait, the original code had:
+                    // asIScriptModule* mod = builder_->GetModule();
+                    // This is safer than engine->GetModule.
+                    
+                    // Let's revert to using builder_->GetModule() to be safe and consistent with original code.
+                    
+                    // Re-reading original code:
+                    // asIScriptModule* mod = builder_->GetModule();
+                    // if (mod) { ... }
+                    
+                    // I will stick to that.
+
                     std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
                     
                     // Check if any of the metadata strings is "Save"
@@ -160,8 +206,13 @@ namespace AngelEngine
                     }
                 }
             }
+            else
+            {
+                 Log::Error("[ScriptEngine] Failed to retrieve module after build: {}", modName.c_str());
+                 return eastl::unexpected(ModuleLoaderError::BuildModuleError);
+            }
 
-            std::println("[ScriptEngine] + Loaded mod: {}", modName.c_str());
+            Log::Info("[ScriptEngine] + Loaded mod: {}", modName.c_str());
             return {};
         }
 

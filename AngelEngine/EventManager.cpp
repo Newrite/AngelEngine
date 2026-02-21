@@ -4,16 +4,14 @@
 #include <mutex>
 #include <angelscript.h>
 
-#include <EASTL/string.h>
 #include <EASTL/vector.h>
 #include <EASTL/vector_map.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/shared_ptr.h>
-#include <EASTL/functional.h>
+#include <EASTL/expected.h>
 
 export module AngelEngine.EventManager;
 
 import AngelEngine.Interfaces;
+import AngelEngine.Logger;
 
 namespace AngelEngine
 {
@@ -34,10 +32,16 @@ namespace AngelEngine
             channels_.clear();
         }
 
-        void RegisterChannel(uint32_t eventId, IEventChannel* channel) override
+        eastl::expected<void, EventError> RegisterChannel(uint32_t eventId, IEventChannel* channel) override
         {
             std::scoped_lock lock(mutex_);
+            if (channels_.find(eventId) != channels_.end())
+            {
+                Log::Warning("[EventManager] Channel {} already registered.", eventId);
+                return eastl::unexpected(EventError::ChannelAlreadyRegistered);
+            }
             channels_[eventId] = channel;
+            return {};
         }
 
         void UnregisterChannel(uint32_t eventId) override
@@ -57,8 +61,10 @@ namespace AngelEngine
             return nullptr;
         }
 
-        void ProcessAllDeferred(asIScriptContext* sharedCtx) override
+        eastl::expected<void, EventError> ProcessAllDeferred(asIScriptContext* sharedCtx) override
         {
+            if (!sharedCtx) return eastl::unexpected(EventError::ContextPreparationFailed);
+
             eastl::vector<IEventChannel*> activeChannels;
             {
                 std::scoped_lock lock(mutex_);
@@ -74,8 +80,14 @@ namespace AngelEngine
 
             for (auto* channel : activeChannels)
             {
-                channel->ProcessDeferred(sharedCtx);
+                auto result = channel->ProcessDeferred(sharedCtx);
+                if (!result.has_value())
+                {
+                    Log::Error("[EventManager] Failed to process deferred events for a channel: {}", static_cast<int>(result.error()));
+                    // Continue processing other channels? Yes.
+                }
             }
+            return {};
         }
 
         void ClearAll() override

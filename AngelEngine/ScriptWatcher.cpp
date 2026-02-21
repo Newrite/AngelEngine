@@ -30,10 +30,10 @@ namespace AngelEngine
             stopRequested_.store(false, eastl::memory_order_relaxed);
             reloadPending_.store(false, eastl::memory_order_relaxed);
             
-            watcherThread_ = std::thread(&ScriptWatcher::WatchLoop, this);
+            watcherThread_ = std::thread([this]() { this->WatchLoop(); });
         }
 
-        ~ScriptWatcher()
+        ~ScriptWatcher() override
         {
             stopRequested_.store(true, eastl::memory_order_release);
             if (watcherThread_.joinable())
@@ -55,6 +55,11 @@ namespace AngelEngine
             eastl::vector<OVERLAPPED> overlaps;
             eastl::vector<eastl::vector<uint8_t>> buffers;
             
+            // We need to store handles to close them later
+            // But wait, we need to keep track of which handle corresponds to which path/overlap
+            // The original code had logic issues with vectors resizing or moving if not careful.
+            // But here we reserve and resize upfront.
+
             dirHandles.reserve(paths_.size());
             overlaps.resize(paths_.size());
             buffers.resize(paths_.size());
@@ -85,7 +90,7 @@ namespace AngelEngine
                 overlaps[i].hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
                 
                 // Issue initial read
-                ReadDirectoryChangesW(
+                BOOL success = ReadDirectoryChangesW(
                     hDir,
                     buffers[i].data(),
                     static_cast<DWORD>(buffers[i].size()),
@@ -95,6 +100,11 @@ namespace AngelEngine
                     &overlaps[i],
                     NULL
                 );
+
+                if (!success)
+                {
+                    Log::Error("[ScriptWatcher] ReadDirectoryChangesW failed for: {}", paths_[i].string().c_str());
+                }
             }
 
             if (dirHandles.empty()) return;
@@ -104,8 +114,14 @@ namespace AngelEngine
                 // Wait for any of the directory events or a small timeout to check stop flag
                 // We construct an array of handles to wait on
                 eastl::vector<HANDLE> waitHandles;
-                for(const auto& ov : overlaps) waitHandles.push_back(ov.hEvent);
+                waitHandles.reserve(overlaps.size());
+                for(const auto& ov : overlaps) 
+                {
+                    if (ov.hEvent) waitHandles.push_back(ov.hEvent);
+                }
                 
+                if (waitHandles.empty()) break;
+
                 DWORD waitResult = WaitForMultipleObjects(
                     static_cast<DWORD>(waitHandles.size()),
                     waitHandles.data(),
@@ -129,7 +145,7 @@ namespace AngelEngine
                     
                     // We don't strictly need to process the buffer content, just knowing something changed is enough
                     // But we must reissue the read to catch future changes
-                    ReadDirectoryChangesW(
+                    BOOL success = ReadDirectoryChangesW(
                         dirHandles[index],
                         buffers[index].data(),
                         static_cast<DWORD>(buffers[index].size()),
@@ -139,12 +155,20 @@ namespace AngelEngine
                         &overlaps[index],
                         NULL
                     );
+                    
+                    if (!success)
+                    {
+                         Log::Error("[ScriptWatcher] Re-issuing ReadDirectoryChangesW failed.");
+                    }
                 }
             }
 
             // Cleanup
             for (HANDLE h : dirHandles) CloseHandle(h);
-            for (auto& ov : overlaps) CloseHandle(ov.hEvent);
+            for (auto& ov : overlaps) 
+            {
+                if (ov.hEvent) CloseHandle(ov.hEvent);
+            }
         }
 
         eastl::vector<std::filesystem::path> paths_;

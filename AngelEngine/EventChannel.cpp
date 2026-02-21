@@ -5,6 +5,7 @@
 #include <EASTL/tuple.h>
 #include <EASTL/atomic.h>
 #include <EASTL/utility.h>
+#include <EASTL/expected.h>
 #include <cstdio>
 #include <format>
 
@@ -56,8 +57,10 @@ namespace AngelEngine
             lock_.clear(eastl::memory_order_release);
         }
 
-        void ProcessDeferred(asIScriptContext* ctx) override
+        eastl::expected<void, EventError> ProcessDeferred(asIScriptContext* ctx) override
         {
+            if (!ctx) return eastl::unexpected(EventError::ContextPreparationFailed);
+
             eastl::tuple<eastl::vector<Args>...> processingQueues;
             eastl::vector<asIScriptFunction*> subscribersCopy;
             size_t processingCount = 0;
@@ -66,7 +69,10 @@ namespace AngelEngine
             while (lock_.test_and_set(eastl::memory_order_acquire));
             
             if constexpr (sizeof...(Args) > 0) {
-                processingQueues.swap(queues_);
+                // We need to move the content, but tuple swap might be tricky with vectors if not careful.
+                // eastl::swap should work.
+                using eastl::swap;
+                swap(processingQueues, queues_);
             } else {
                 processingCount = count_;
                 count_ = 0;
@@ -75,7 +81,7 @@ namespace AngelEngine
             if (subscribers_.empty())
             {
                 lock_.clear(eastl::memory_order_release);
-                return;
+                return {};
             }
 
             subscribersCopy.reserve(subscribers_.size());
@@ -100,6 +106,7 @@ namespace AngelEngine
             // 2. Execution Section (No locks)
             size_t count = 0;
             if constexpr (sizeof...(Args) > 0) {
+                // Assuming all vectors in tuple have same size (they should if Enqueue is consistent)
                 count = eastl::get<0>(processingQueues).size();
             } else {
                 count = processingCount;
@@ -109,22 +116,31 @@ namespace AngelEngine
             {
                 for (auto* func : subscribersCopy)
                 {
-                    ctx->Prepare(func);
+                    int r = ctx->Prepare(func);
+                    if (r < 0)
+                    {
+                        Log::Error("Failed to prepare context for event subscriber: {}", r);
+                        continue;
+                    }
+
                     if constexpr (sizeof...(Args) > 0) {
                         SetArgs(ctx, i, processingQueues, eastl::make_index_sequence<sizeof...(Args)>{});
                     }
                     
-                    int r = ctx->Execute();
+                    r = ctx->Execute();
                     if (r == asEXECUTION_EXCEPTION) {
                         const char* exceptionDesc = ctx->GetExceptionString();
-                        Log::Error("Script Exception: {}", exceptionDesc);
+                        Log::Error("Script Exception in event handler: {}", exceptionDesc);
                     } else if (r == asEXECUTION_ABORTED) {
-                        Log::Error("Script Execution Aborted.");
+                        Log::Error("Script Execution Aborted in event handler.");
+                    } else if (r < 0) {
+                        Log::Error("Script Execution Failed in event handler: {}", r);
                     }
 
                     ctx->Unprepare();
                 }
             }
+            return {};
         }
         
         void Clear() override
@@ -145,12 +161,15 @@ namespace AngelEngine
         template<size_t... Is>
         void EnqueueImpl(eastl::index_sequence<Is...>, Args... args)
         {
+             // We need to push back to each vector in the tuple
+             // Using fold expression
              (eastl::get<Is>(queues_).push_back(args), ...);
         }
 
         template<size_t... Is>
         void SetArgs(asIScriptContext* ctx, size_t index, const eastl::tuple<eastl::vector<Args>...>& queues, eastl::index_sequence<Is...>)
         {
+            // SetArg is overloaded in Interfaces.ixx
             (AngelEngine::SetArg(ctx, static_cast<asUINT>(Is), eastl::get<Is>(queues)[index]), ...);
         }
         

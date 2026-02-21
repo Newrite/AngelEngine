@@ -8,18 +8,19 @@
 export module AngelEngine.ReloadManager;
 
 import AngelEngine.Interfaces;
+import AngelEngine.Logger;
 
 namespace AngelEngine
 {
     export class ReloadManager final : public IReloadManager
     {
     public:
-        eastl::expected<void, ModuleLoaderError> ReloadScripts(asIScriptEngine* engine,
+        eastl::expected<void, ReloadError> ReloadScripts(asIScriptEngine* engine,
                                                          IModuleLoader* moduleLoader,
                                                          IExecutionManager* executionManager,
                                                          IEventManager* eventManager) override
         {
-            std::println("[ScriptEngine] Starting Reload...");
+            Log::Info("[ScriptEngine] Starting Reload...");
 
             executionManager->AbortAll();
             eventManager->ClearAll();
@@ -29,17 +30,19 @@ namespace AngelEngine
             auto compileResult = moduleLoader->CompileAllMods(engine);
             if (!compileResult.has_value())
             {
-                return compileResult;
+                Log::Error("[ReloadManager] Compilation failed during reload: {}", static_cast<int>(compileResult.error()));
+                return eastl::unexpected(ReloadError::ScriptRebuildFailed);
             }
 
 
             auto runResult = executionManager->RunAllMods(engine, moduleLoader);
             if (!runResult.has_value())
             {
-                return eastl::unexpected(ModuleLoaderError::GenericError);
+                Log::Error("[ReloadManager] Execution failed during reload: {}", static_cast<int>(runResult.error()));
+                return eastl::unexpected(ReloadError::ExecutionManagerFailed);
             }
 
-            std::println("[ScriptEngine] Reload completed.");
+            Log::Info("[ScriptEngine] Reload completed.");
             return {};
         }
     };

@@ -51,6 +51,7 @@ namespace AngelEngine
             asIScriptEngine* rawEngine = asCreateScriptEngine();
             if (!rawEngine)
             {
+                Log::Error("[ScriptEngine] Failed to create AngelScript engine.");
                 return eastl::unexpected(EngineError::CreateAngelScriptEngineFailed);
             }
 
@@ -84,32 +85,46 @@ namespace AngelEngine
         void CallGarbageCollectorFullCycle() override
         {
             std::scoped_lock lock(mutex_);
-            engine_->GarbageCollect();
+            int r = engine_->GarbageCollect();
+            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect failed with code: {}", r);
         }
 
         void CallGarbageColletorOneStep() override
         {
             std::scoped_lock lock(mutex_);
-            engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
+            int r = engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
+            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
         }
 
-        void Tick(float deltaTime) override
+        eastl::expected<void, EngineError> Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
             
             // Check for auto-reload
             if (scriptWatcher_ && scriptWatcher_->CheckAndResetReloadFlag())
             {
-                HotReload();
+                auto reloadResult = HotReload();
+                if (!reloadResult.has_value())
+                {
+                    Log::Error("[ScriptEngine] Auto-reload failed with code: {}", static_cast<int>(reloadResult.error()));
+                }
             }
             
             // Push Tick Event to Channel
             if (eventBinding_)
             {
+                // Assuming PushTick doesn't fail or handles its own errors
                 static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
             }
 
-            executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
+            auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
+            if (!tickResult.has_value())
+            {
+                Log::Error("[ScriptEngine] ExecutionManager Tick failed: {}", static_cast<int>(tickResult.error()));
+                return eastl::unexpected(EngineError::GenericError);
+            }
+            
+            return {};
         }
 
         eastl::expected<void, EngineError> RunAllMods() override
@@ -119,7 +134,7 @@ namespace AngelEngine
             auto resultRunMods = executionManager_->RunAllMods(engine_.get(), moduleLoader_.get());
             if (!resultRunMods.has_value())
             {
-                // TODO: Broadcast error via listener
+                Log::Error("[ScriptEngine] Failed to run all mods: {}", static_cast<int>(resultRunMods.error()));
                 return eastl::unexpected(EngineError::FailRunMods);
             }
 
@@ -133,7 +148,7 @@ namespace AngelEngine
             auto resultRunMod = executionManager_->RunMod(engine_.get(), modName);
             if (!resultRunMod.has_value())
             {
-                // TODO: Broadcast error via listener
+                Log::Error("[ScriptEngine] Failed to run mod {}: {}", modName.c_str(), static_cast<int>(resultRunMod.error()));
                 return eastl::unexpected(EngineError::FailRunMods);
             }
 
@@ -150,6 +165,7 @@ namespace AngelEngine
 
             if (!resultCompileMods.has_value())
             {
+                Log::Error("[ScriptEngine] Failed to compile all mods: {}", static_cast<int>(resultCompileMods.error()));
                 return eastl::unexpected(EngineError::FailCompileMods);
             }
 
@@ -165,6 +181,7 @@ namespace AngelEngine
 
             if (!resultHotReload.has_value())
             {
+                Log::Error("[ScriptEngine] Hot reload failed: {}", static_cast<int>(resultHotReload.error()));
                 return eastl::unexpected(EngineError::FailHotReload);
             }
             
@@ -185,15 +202,25 @@ namespace AngelEngine
         ISaveLoadManager* GetSaveLoadManager() const override { return saveLoadManager_.get(); }
         asIScriptEngine* GetEngine() const override { return engine_.get(); }
         
-        void InitializeEngine()
+        eastl::expected<void, EngineError> InitializeEngine()
         {
-            engine_->SetMessageCallback(asFUNCTION(MessageCallback), this, asCALL_CDECL);
+            int r = engine_->SetMessageCallback(asFUNCTION(MessageCallback), this, asCALL_CDECL);
+            if (r < 0) 
+            {
+                Log::Error("[ScriptEngine] Failed to set message callback: {}", r);
+                return eastl::unexpected(EngineError::GenericError);
+            }
 
-            engine_->SetContextCallbacks(
+            r = engine_->SetContextCallbacks(
                 RequestContextCallback,
                 ReturnContextCallback,
                 this
             );
+            if (r < 0)
+            {
+                Log::Error("[ScriptEngine] Failed to set context callbacks: {}", r);
+                return eastl::unexpected(EngineError::CreateAngelScriptContextFailed);
+            }
 
             if (useJit_)
             {
@@ -211,12 +238,25 @@ namespace AngelEngine
             engine_->SetEngineProperty(asEP_DISALLOW_VALUE_ASSIGN_FOR_REF_TYPE, 1);
             engine_->SetEngineProperty(asEP_REQUIRE_ENUM_SCOPE, 1);
 
-            bindingManager_->RegisterStandardAddons(engine_.get());
+            auto result = bindingManager_->RegisterStandardAddons(engine_.get());
+            if (!result.has_value()) 
+            {
+                Log::Error("[ScriptEngine] Failed to register standard addons.");
+                return eastl::unexpected(EngineError::GenericError);
+            }
+            
             executionManager_->RegisterThreadSupport(engine_.get());
 
-            BindAll();
+            auto bindResult = BindAll();
+            if (!bindResult.has_value())
+            {
+                 return eastl::unexpected(EngineError::GenericError);
+            }
+            
             GenerateScriptPredefined(engine_.get(), AS_PREDEFINED_PATH);
             BroadcastEngineInitialized();
+            
+            return {};
         }
 
     private:
@@ -271,18 +311,25 @@ namespace AngelEngine
             }
         }
 
-        void BindAll()
+        eastl::expected<void, BindingError> BindAll()
         {
             if (eventBinding_)
             {
-                 bindingManager_->Bind(engine_.get(), eventBinding_.get());
+                 auto result = bindingManager_->Bind(engine_.get(), eventBinding_.get());
+                 if (!result.has_value()) 
+                 {
+                     Log::Error("[ScriptEngine] Failed to bind EventBinding.");
+                     return result;
+                 }
             }
 
             auto result = bindingManager_->BindAll(engine_.get());
             if (!result.has_value())
             {
-                // TODO: Broadcast error
+                Log::Error("[ScriptEngine] Failed to bind all bindings: {}", static_cast<int>(result.error()));
+                return result;
             }
+            return {};
         }
         
         void Bind(IScriptBinding* binding)
@@ -290,7 +337,7 @@ namespace AngelEngine
             auto result = bindingManager_->Bind(engine_.get(), binding);
             if (!result.has_value())
             {
-                // TODO: Broadcast error
+                Log::Error("[ScriptEngine] Failed to bind: {}", static_cast<int>(result.error()));
             }
         }
 

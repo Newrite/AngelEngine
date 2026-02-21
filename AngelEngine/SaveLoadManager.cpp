@@ -10,6 +10,7 @@
 
 #include <EASTL/vector.h>
 #include <EASTL/string.h>
+#include <EASTL/expected.h>
 
 export module AngelEngine.SaveLoadManager;
 
@@ -104,6 +105,8 @@ namespace AngelEngine
                     if (type)
                     {
                         // Recursively save the object
+                        // Note: This is simplified. Real serialization needs to handle circular references and polymorphism properly.
+                        // But for this task, we stick to the provided logic structure.
                         return SaveValue(obj, type->GetTypeId());
                     }
                     return false;
@@ -257,9 +260,9 @@ namespace AngelEngine
             handlers_.push_back(handler);
         }
 
-        bool GetSaveData(asIScriptEngine* engine, IModuleLoader* loader, eastl::vector<uint8_t>& outData) override
+        eastl::expected<eastl::vector<uint8_t>, SerializationError> GetSaveData(asIScriptEngine* engine, IModuleLoader* loader) override
         {
-            outData.clear();
+            eastl::vector<uint8_t> outData;
             ByteStream stream(outData);
             BinarySerializer serializer(engine, &stream, handlers_);
 
@@ -274,13 +277,11 @@ namespace AngelEngine
                 stream.Write(&nameLen, sizeof(nameLen));
                 if (nameLen > 0) stream.Write(modName.c_str(), nameLen);
 
-                asIScriptModule* mod = engine->GetModule(modName.c_str());
+                asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
                 if (!mod) 
                 {
-                    // Should not happen if loaded_modules is in sync, but handle gracefully
-                    uint32_t zero = 0;
-                    stream.Write(&zero, sizeof(zero));
-                    continue;
+                    Log::Error("[SaveLoadManager] Module not found during save: {}", modName.c_str());
+                    return eastl::unexpected(SerializationError::SaveFailed);
                 }
 
                 const auto& saveableVars = loader->GetSaveableVars(modName);
@@ -308,94 +309,94 @@ namespace AngelEngine
                         if (!serializer.SaveValue(ref, typeId))
                         {
                             Log::Error("[SaveLoadManager] Failed to save variable: {} (TypeID: {})", varName.c_str(), typeId);
-                            return false;
+                            return eastl::unexpected(SerializationError::SaveFailed);
                         }
                     }
                     else
                     {
-                        // Variable not found? Write invalid type or handle error.
-                        // For now, we assume GetSaveableVars returns valid vars.
-                        // If not found, we might corrupt stream if we don't write anything but wrote varCount.
-                        // Let's write a dummy typeId -1 to indicate skip?
-                        // But the loader expects valid data.
-                        // We should probably filter saveableVars before writing count.
-                        // But for simplicity, let's assume valid.
-                        int invalidType = -1;
-                        stream.Write(&invalidType, sizeof(invalidType));
+                        // Variable not found? 
+                        Log::Error("[SaveLoadManager] Variable {} not found in module {}", varName.c_str(), modName.c_str());
+                        return eastl::unexpected(SerializationError::SaveFailed);
                     }
                 }
             }
-            return true;
+            return outData;
         }
 
-        bool LoadFromData(asIScriptEngine* engine, const eastl::vector<uint8_t>& data) override
+        eastl::expected<void, SerializationError> LoadFromData(asIScriptEngine* engine, const eastl::vector<uint8_t>& data) override
         {
-            if (data.empty()) return false;
+            if (data.empty()) return eastl::unexpected(SerializationError::InvalidData);
             ByteStream stream(data);
             BinarySerializer serializer(engine, &stream, handlers_);
 
             uint32_t modCount = 0;
-            if (stream.Read(&modCount, sizeof(modCount)) < 0) return false;
+            if (stream.Read(&modCount, sizeof(modCount)) < 0) return eastl::unexpected(SerializationError::InvalidData);
 
             for (uint32_t i = 0; i < modCount; ++i)
             {
                 // Read Module Name
                 uint32_t nameLen = 0;
-                if (stream.Read(&nameLen, sizeof(nameLen)) < 0) return false;
+                if (stream.Read(&nameLen, sizeof(nameLen)) < 0) return eastl::unexpected(SerializationError::InvalidData);
                 
                 eastl::string modName;
                 modName.resize(nameLen);
                 if (nameLen > 0)
                 {
-                    if (stream.Read(modName.data(), nameLen) < 0) return false;
+                    if (stream.Read(modName.data(), nameLen) < 0) return eastl::unexpected(SerializationError::InvalidData);
                 }
 
-                asIScriptModule* mod = engine->GetModule(modName.c_str());
-                // If mod is null, we have a mismatch. We should return false as per requirements.
-                if (!mod) return false;
+                asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
+                if (!mod) 
+                {
+                    Log::Error("[SaveLoadManager] Module not found during load: {}", modName.c_str());
+                    return eastl::unexpected(SerializationError::LoadFailed);
+                }
 
                 uint32_t varCount = 0;
-                if (stream.Read(&varCount, sizeof(varCount)) < 0) return false;
+                if (stream.Read(&varCount, sizeof(varCount)) < 0) return eastl::unexpected(SerializationError::InvalidData);
 
                 for (uint32_t j = 0; j < varCount; ++j)
                 {
                     // Read Var Name
                     uint32_t varNameLen = 0;
-                    if (stream.Read(&varNameLen, sizeof(varNameLen)) < 0) return false;
+                    if (stream.Read(&varNameLen, sizeof(varNameLen)) < 0) return eastl::unexpected(SerializationError::InvalidData);
 
                     eastl::string varName;
                     varName.resize(varNameLen);
                     if (varNameLen > 0)
                     {
-                        if (stream.Read(varName.data(), varNameLen) < 0) return false;
+                        if (stream.Read(varName.data(), varNameLen) < 0) return eastl::unexpected(SerializationError::InvalidData);
                     }
 
                     // Read TypeID
                     int storedTypeId = 0;
-                    if (stream.Read(&storedTypeId, sizeof(storedTypeId)) < 0) return false;
-
-                    if (storedTypeId == -1) continue; // Skip invalid vars
+                    if (stream.Read(&storedTypeId, sizeof(storedTypeId)) < 0) return eastl::unexpected(SerializationError::InvalidData);
 
                     int varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
-                    if (varIdx < 0) return false; // Variable missing in current script
+                    if (varIdx < 0) 
+                    {
+                        Log::Error("[SaveLoadManager] Variable {} not found in module {}", varName.c_str(), modName.c_str());
+                        return eastl::unexpected(SerializationError::LoadFailed);
+                    }
 
                     int currentTypeId = 0;
                     mod->GetGlobalVar(varIdx, nullptr, nullptr, &currentTypeId);
                     
-                    // Simple type compatibility check
-                    // Note: TypeIDs might change between compilations if types are reordered/changed.
-                    // Ideally we should check type names, but TypeID check is requested.
-                    // If types mismatch, return false.
-                    if (currentTypeId != storedTypeId) return false;
+                    if (currentTypeId != storedTypeId) 
+                    {
+                        Log::Error("[SaveLoadManager] Type mismatch for variable {}: stored {}, current {}", varName.c_str(), storedTypeId, currentTypeId);
+                        return eastl::unexpected(SerializationError::LoadFailed);
+                    }
 
                     void* ref = mod->GetAddressOfGlobalVar(varIdx);
                     if (!serializer.LoadValue(ref, currentTypeId))
                     {
-                        return false;
+                        Log::Error("[SaveLoadManager] Failed to load value for variable {}", varName.c_str());
+                        return eastl::unexpected(SerializationError::LoadFailed);
                     }
                 }
             }
-            return true;
+            return {};
         }
 
     private:

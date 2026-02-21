@@ -373,9 +373,12 @@ int main() {
 
     // Phase 2: Saving
     std::println("Phase 2: Saving");
-    eastl::vector<uint8_t> saveBlob;
-    bool saveRes = saveLoadManager->GetSaveData(engine->GetEngine(), engine->GetModuleLoader(), saveBlob);
-    TEST_ASSERT(saveRes, "Save failed");
+    
+    // FIX: GetSaveData now returns eastl::expected<eastl::vector<uint8_t>, SerializationError>
+    // and takes 2 arguments: engine and loader.
+    auto saveRes = saveLoadManager->GetSaveData(engine->GetEngine(), engine->GetModuleLoader());
+    TEST_ASSERT(saveRes.has_value(), "Save failed");
+    eastl::vector<uint8_t> saveBlob = saveRes.value();
     TEST_ASSERT(!saveBlob.empty(), "Save blob is empty");
     std::println("Saved {} bytes.", saveBlob.size());
 
@@ -413,8 +416,9 @@ int main() {
 
     // Phase 4: Loading
     std::println("Phase 4: Loading");
-    bool loadRes = saveLoadManager->LoadFromData(engine->GetEngine(), saveBlob);
-    TEST_ASSERT(loadRes, "Load failed");
+    // FIX: LoadFromData returns eastl::expected<void, SerializationError>
+    auto loadRes = saveLoadManager->LoadFromData(engine->GetEngine(), saveBlob);
+    TEST_ASSERT(loadRes.has_value(), "Load failed");
 
     // Phase 5: Verification
     std::println("Phase 5: Verification");
@@ -547,7 +551,7 @@ int main() {
     loopCtx->Prepare(loopMain);
     
     std::println("Executing infinite loop script...");
-    r = engine->GetExecutionManager()->ExecuteManaged(loopCtx);
+    r = engine->GetExecutionManager()->ExecuteManaged(loopCtx).value_or(asEXECUTION_ERROR);
     
     std::println("Loop execution result: {}", r);
     TEST_ASSERT(r == asEXECUTION_ABORTED, "Infinite loop was not aborted by watchdog");
@@ -619,7 +623,7 @@ int main() {
     // We can't easily isolate just one mod with the current `RunAllMods` API.
     // However, for this test, maybe we can just run everything and check the logs.
     // But `LoopTest` will abort again, which is annoying.
-    // `TestMod` will print stuff.
+    // `TestMod` is fine.
     
     // Ideally we would have `engine->GetExecutionManager()->ExecuteMod("CoroutineTest")`.
     // Since we don't, let's just manually create a context and register it with the ContextMgr?

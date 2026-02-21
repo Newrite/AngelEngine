@@ -65,12 +65,14 @@ namespace AngelEngineTest
         {
             if (!callback) return;
             customEventChannel_.AddSubscriber(callback);
+            (void)callback->Release();
         }
         
         void SubscribeDeferredEvent(asIScriptFunction* callback)
         {
             if (!callback) return;
             deferredEventChannel_.AddSubscriber(callback);
+            (void)callback->Release();
         }
 
         // Public accessors for pushing events

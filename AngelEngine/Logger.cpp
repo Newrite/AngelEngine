@@ -4,6 +4,7 @@
 #include <format>
 #include <print>
 #include <utility>
+#include <string>
 
 export module AngelEngine.Logger;
 
@@ -22,17 +23,16 @@ namespace AngelEngine
         virtual void Log(LogLevel level, const char* message) = 0;
     };
 
-    export namespace Log
+    export class Log
     {
-        ILogger* g_logger = nullptr;
-
-        void SetLogger(ILogger* logger)
+    public:
+        static inline void SetLogger(ILogger* logger)
         {
             g_logger = logger;
         }
 
         template<typename... Args>
-        void Info(std::format_string<Args...> fmt, Args&&... args)
+        static void Info(std::format_string<Args...> fmt, Args&&... args)
         {
             if (g_logger)
             {
@@ -46,7 +46,7 @@ namespace AngelEngine
         }
 
         template<typename... Args>
-        void Warning(std::format_string<Args...> fmt, Args&&... args)
+        static void Warning(std::format_string<Args...> fmt, Args&&... args)
         {
             if (g_logger)
             {
@@ -60,7 +60,7 @@ namespace AngelEngine
         }
 
         template<typename... Args>
-        void Error(std::format_string<Args...> fmt, Args&&... args)
+        static void Error(std::format_string<Args...> fmt, Args&&... args)
         {
             if (g_logger)
             {
@@ -72,5 +72,8 @@ namespace AngelEngine
                 std::println(stderr, "[ERROR] {}", std::format(fmt, std::forward<Args>(args)...));
             }
         }
-    }
+
+    private:
+        static inline ILogger* g_logger = nullptr;
+    };
 }
