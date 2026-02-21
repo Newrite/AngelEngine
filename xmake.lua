@@ -12,11 +12,20 @@ add_rules("plugin.vsxmake.autoupdate")
 
 set_languages("c++latest")
 set_warnings("all", "error")
-set_toolchains("clang-cl")
 set_arch("x64")
+
+if is_plat("windows") then
+    set_toolchains("clang-cl")
+    -- Говорим xmake использовать lld-link для LTO
+    set_toolset("ld", "lld-link")
+    set_toolset("sh", "lld-link")
+    set_toolset("ar", "llvm-ar") -- <--- ДОБАВИТЬ ЭТО
+end
 
 -- Electonic Art Standard Template Library
 add_requires("eastl")
+
+add_requires("mimalloc")
 
 -- Include Angel Script JIT
 includes("GitModules/AngelScript-JIT-Compiler")
@@ -135,6 +144,7 @@ target("AngelScript")
 target("AngelEngine")
     set_kind("static")
 
+    add_packages("mimalloc")
     add_packages("eastl", { public = true })
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")

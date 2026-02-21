@@ -2,29 +2,40 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdarg>
+#include <mimalloc.h>
 
-// EASTL New Operators implementation
-// Required because we use EASTL without a custom allocator configuration that overrides this requirement.
+// ------------------------------------------------------------------------
+// 1. СТАНДАРТНЫЕ C++ АЛЛОКАТОРЫ (Этого нам не хватало)
+// ------------------------------------------------------------------------
+void* operator new(size_t size) { return mi_malloc(size); }
+void* operator new[](size_t size) { return mi_malloc(size); }
+void* operator new(size_t size, std::align_val_t al) { return mi_malloc_aligned(size, static_cast<size_t>(al)); }
+void* operator new[](size_t size, std::align_val_t al) { return mi_malloc_aligned(size, static_cast<size_t>(al)); }
 
-void* operator new[](size_t size, const char* /*name*/, int /*flags*/, unsigned /*debugFlags*/, const char* /*file*/, int /*line*/)
-{
-    return new uint8_t[size];
+// ------------------------------------------------------------------------
+// 2. EASTL АЛЛОКАТОРЫ
+// ------------------------------------------------------------------------
+void* operator new[](size_t size, const char* /*name*/, int /*flags*/, unsigned /*debugFlags*/, const char* /*file*/, int /*line*/) {
+    return mi_malloc(size);
 }
 
-void* operator new[](size_t size, size_t alignment, size_t alignmentOffset, const char* /*name*/, int /*flags*/, unsigned /*debugFlags*/, const char* /*file*/, int /*line*/)
-{
-    // ВАЖНО: Мы не используем C++17 std::align_val_t.
-    // Дефолтный деаллокатор EASTL вызывает стандартный delete[], который мапится в free().
-    // Использование std::align_val_t вызовет _aligned_malloc, что приведет к крашу 
-    // _CrtIsValidHeapPointer при попытке сделать free().
-    // На x64 стандартный new дает выравнивание 16 байт, что достаточно.
-    return new uint8_t[size];
+void* operator new[](size_t size, size_t alignment, size_t /*alignmentOffset*/, const char* /*name*/, int /*flags*/, unsigned /*debugFlags*/, const char* /*file*/, int /*line*/) {
+    return mi_malloc_aligned(size, alignment);
 }
 
-// Предоставляем реализацию Vsnprintf, которую ожидает EASTL, 
-// и проксируем её в стандартную C-библиотеку.
-// Обязательно используем __restrict, иначе MSVC/clang-cl 
-// сгенерирует другое mangled-имя и линкер выдаст unresolved external.
+// ------------------------------------------------------------------------
+// 3. ГЛОБАЛЬНЫЕ ДЕАЛЛОКАТОРЫ
+// ------------------------------------------------------------------------
+void operator delete(void* p) noexcept { mi_free(p); }
+void operator delete[](void* p) noexcept { mi_free(p); }
+void operator delete(void* p, size_t) noexcept { mi_free(p); }
+void operator delete[](void* p, size_t) noexcept { mi_free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { mi_free(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { mi_free(p); }
+
+// ------------------------------------------------------------------------
+// 4. EASTL СОВМЕСТИМОСТЬ
+// ------------------------------------------------------------------------
 namespace EA
 {
     namespace StdC
