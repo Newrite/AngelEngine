@@ -271,7 +271,8 @@ int main() {
     // Configuration
     ModuleLoaderConfig config {
         .scriptsPathStd = fs::absolute("angelscripts/std"),
-        .scriptsPathMod = fs::absolute("angelscripts/mods")
+        .scriptsPathMod = fs::absolute("angelscripts/mods"),
+        .enableAutoReload = true
     };
 
     // Factory

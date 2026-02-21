@@ -6,7 +6,6 @@ set_policy("package.requires_lock", true)
 set_policy("check.auto_ignore_flags", false)
 
 set_policy("build.c++.modules", true)
-set_policy("build.optimization.lto", true)
 
 add_rules("mode.debug", "mode.release")
 add_rules("plugin.vsxmake.autoupdate")
@@ -23,21 +22,31 @@ add_requires("eastl")
 includes("GitModules/AngelScript-JIT-Compiler")
 
 if is_mode("release") or is_mode("releasedbg") then
-    -- 1. Высший уровень абстракции xmake
-    set_optimize("aggressive") -- Более агрессивно, чем "fastest". Включает -Ofast (GCC/Clang) или макс. оптимизацию MSVC
+    -- 1. Высший уровень абстракции xmake (включает -O3 / -Ofast)
+    set_optimize("aggressive")
 
-    -- 3. Агрессивные флаги MSVC
+    -- 2. Включаем LTO (Link-Time Optimization) - критически важно для производительности!
+    set_policy("build.optimization.lto", true)
+
+    -- 3. Агрессивные флаги, которые понимают и MSVC, и clang-cl
     add_cxflags(
-            "/Ob3",       -- Максимально агрессивный инлайнинг (доступен с VS 2019). Намного мощнее классического /Ob2.
-            "/Oi",        -- Встроенные intrinsic-функции (замена вызовов CRT на прямые ассемблерные инструкции процессора).
-            "/Ot",        -- Предпочтение скорости над размером бинарника (Favor Fast Code).
-            "/fp:fast",   -- Быстрая математика. Разрешает компилятору переупорядочивать FPU/SIMD инструкции.
-            "/GS-",       -- Отключает Buffer Security Check. Убирает лишние проверки стека (Security Cookie) в каждой функции. Дает чистый буст.
-            "/arch:AVX2", -- Векторизация. Заставляет компилятор использовать 256-битные регистры YMM для операций с памятью и математикой.
-            "/Zc:inline",  -- Удаляет неиспользуемые inline-функции на этапе компиляции, ускоряя сборку и линковку.
+            "/Ob3",       -- Максимальный инлайнинг
+            "/Oi",        -- Intrinsic-функции
+            "/Ot",        -- Favor Fast Code
+            "/fp:fast",   -- Быстрая математика FPU/SIMD
+            "/GS-",       -- Отключение Security Cookie (чистый буст)
+            "/arch:AVX2", -- Векторизация YMM
+            "/Zc:inline", -- Удаление неиспользуемых COMDAT
+            { tools = {"cl", "clang_cl"} } -- <--- Применяем к обоим!
+    )
+
+    -- 4. Специфичные флаги ТОЛЬКО для Clang (LLVM Superpowers)
+    -- clang-cl позволяет прокидывать родные флаги Clang через /clang:
+    add_cxflags(
+            "/clang:-fstrict-aliasing", -- Строгое алиасирование (LLVM обожает его для оптимизации указателей)
+            "/clang:-fvectorize",       -- Принудительная векторизация циклов
             { tools = "clang_cl" }
     )
-    
 end
 
 -------------------------------------------------------------------------------

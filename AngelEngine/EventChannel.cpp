@@ -5,10 +5,13 @@
 #include <EASTL/tuple.h>
 #include <EASTL/atomic.h>
 #include <EASTL/utility.h>
+#include <cstdio>
+#include <format>
 
 export module AngelEngine.EventChannel;
 
 import AngelEngine.Interfaces;
+import AngelEngine.Logger;
 
 namespace AngelEngine
 {
@@ -83,6 +86,17 @@ namespace AngelEngine
             
             lock_.clear(eastl::memory_order_release);
             
+            // RAII Wrapper to ensure Release() is called on subscribers
+            struct ScopedSubscriberList {
+                eastl::vector<asIScriptFunction*>& list;
+                ScopedSubscriberList(eastl::vector<asIScriptFunction*>& l) : list(l) {}
+                ~ScopedSubscriberList() {
+                    for (auto* f : list) {
+                        if (f) f->Release();
+                    }
+                }
+            } scopedSubscribers(subscribersCopy);
+
             // 2. Execution Section (No locks)
             size_t count = 0;
             if constexpr (sizeof...(Args) > 0) {
@@ -99,13 +113,18 @@ namespace AngelEngine
                     if constexpr (sizeof...(Args) > 0) {
                         SetArgs(ctx, i, processingQueues, eastl::make_index_sequence<sizeof...(Args)>{});
                     }
-                    ctx->Execute();
+                    
+                    int r = ctx->Execute();
+                    if (r == asEXECUTION_EXCEPTION) {
+                        const char* exceptionDesc = ctx->GetExceptionString();
+                        Log::Error("Script Exception: {}", exceptionDesc);
+                    } else if (r == asEXECUTION_ABORTED) {
+                        Log::Error("Script Execution Aborted.");
+                    }
+
                     ctx->Unprepare();
                 }
             }
-
-            // Release temporary references
-            for(auto* f : subscribersCopy) f->Release();
         }
         
         void Clear() override

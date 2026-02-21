@@ -59,6 +59,7 @@ namespace AngelEngine
     {
         const std::filesystem::path scriptsPathStd;
         const std::filesystem::path scriptsPathMod;
+        bool enableAutoReload = false;
     };
     
     // --- String Hashing (Compile-Time & Runtime) ---
@@ -191,6 +192,13 @@ namespace AngelEngine
         virtual void AddBinding(IScriptBinding* binding) = 0;
     };
 
+    // Forward declaration for ScriptWatcher
+    export struct IScriptWatcher
+    {
+        virtual ~IScriptWatcher() = default;
+        virtual bool CheckAndResetReloadFlag() = 0;
+    };
+
     export struct IEngineComponentFactory
     {
         virtual ~IEngineComponentFactory() = default;
@@ -200,6 +208,7 @@ namespace AngelEngine
         virtual eastl::unique_ptr<ISaveLoadManager> CreateSaveLoadManager() = 0;
         virtual eastl::unique_ptr<IBindingManager> CreateBindingManager() = 0;
         virtual eastl::unique_ptr<IEventManager> CreateEventManager() = 0;
+        virtual eastl::unique_ptr<IScriptWatcher> CreateScriptWatcher() = 0;
     };
     
     export struct IEngineListener

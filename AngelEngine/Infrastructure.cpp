@@ -17,6 +17,7 @@ import AngelEngine.ReloadManager;
 import AngelEngine.SaveLoadManager;
 import AngelEngine.BindingManager;
 import AngelEngine.EventManager;
+import AngelEngine.ScriptWatcher;
 
 namespace fs = std::filesystem;
 
@@ -164,6 +165,15 @@ namespace AngelEngine
         eastl::unique_ptr<IEventManager> CreateEventManager() override
         {
             return eastl::make_unique<EventManager>();
+        }
+
+        eastl::unique_ptr<IScriptWatcher> CreateScriptWatcher() override
+        {
+            if (config_.enableAutoReload)
+            {
+                return eastl::make_unique<ScriptWatcher>(config_.scriptsPathStd, config_.scriptsPathMod);
+            }
+            return nullptr;
         }
 
     private:

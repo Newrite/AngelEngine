@@ -5,7 +5,7 @@ module;
 #include <print>
 #include <thread>
 #include <condition_variable>
-#include <chrono>
+#include <format>
 
 #include <angelscript.h>
 #include <contextmgr.h>
@@ -20,6 +20,7 @@ module;
 export module AngelEngine.ExecutionManager;
 
 import AngelEngine.Interfaces;
+import AngelEngine.Logger;
 
 namespace fs = std::filesystem;
 
@@ -130,7 +131,7 @@ namespace AngelEngine
 
             if (moduleLoader->Empty())
             {
-                std::println("[ScriptEngine] No mods loaded to run.");
+                Log::Info("[ScriptEngine] No mods loaded to run.");
                 return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
             }
 
@@ -151,7 +152,7 @@ namespace AngelEngine
 
             if (modName.empty())
             {
-                std::println("[ScriptEngine] No mod load to run.");
+                Log::Info("[ScriptEngine] No mod load to run.");
                 return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
             }
             
@@ -262,13 +263,13 @@ namespace AngelEngine
                     // Сбрасываем таймер для следующих скриптов в очереди
                     self->executionStartTimeMs_.store(GetSystemTimeMs(), eastl::memory_order_relaxed);
 
-                    std::println(stderr, "[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
+                    Log::Error("[Watchdog] Script aborted! Execution exceeded {}ms in a single frame.",
                                  MAX_SCRIPT_EXEC_TIME_MS);
                     
                     const char* section = "";
                     int line = ctx->GetLineNumber(0, 0, &section);
                     auto* func = ctx->GetFunction(0);
-                    std::println(stderr, "           At: {} ({}:{})", func ? func->GetDeclaration() : "null", section, line);
+                    Log::Error("           At: {} ({}:{})", func ? func->GetDeclaration() : "null", section, line);
 
                     ctx->Abort();
                 }
@@ -280,19 +281,19 @@ namespace AngelEngine
         // --- Exception Callback ---
         static void ExceptionCallback(asIScriptContext* ctx, void* param)
         {
-            std::println(stderr, "[Script Exception] {}", ctx->GetExceptionString());
+            Log::Error("[Script Exception] {}", ctx->GetExceptionString());
             
             const asIScriptFunction* func = ctx->GetExceptionFunction();
             if (func)
             {
-                std::println(stderr, "  Function: {}", func->GetDeclaration());
-                std::println(stderr, "  Section:  {}", func->GetModuleName()); 
+                Log::Error("  Function: {}", func->GetDeclaration());
+                Log::Error("  Section:  {}", func->GetModuleName()); 
             }
             
-            std::println(stderr, "  Line:     {}", ctx->GetExceptionLineNumber());
+            Log::Error("  Line:     {}", ctx->GetExceptionLineNumber());
 
             // Print Call Stack
-            std::println(stderr, "--- Call Stack ---");
+            Log::Error("--- Call Stack ---");
             for (asUINT n = 0; n < ctx->GetCallstackSize(); n++)
             {
                 asIScriptFunction* stackFunc = ctx->GetFunction(n);
@@ -301,13 +302,13 @@ namespace AngelEngine
                     int line, column;
                     const char* section;
                     line = ctx->GetLineNumber(n, &column, &section);
-                    std::println(stderr, "  {}: {} ({}, {})", 
+                    Log::Error("  {}: {} ({}, {})", 
                         stackFunc->GetDeclaration(), 
                         section ? section : "<unknown>", 
                         line, column);
                 }
             }
-            std::println(stderr, "------------------");
+            Log::Error("------------------");
         }
 
         eastl::expected<void, ExecutionError> StartModContext(asIScriptEngine* engine,
@@ -327,10 +328,10 @@ namespace AngelEngine
                 // Set Exception Handler (LineCallback is set by RequestContextCallback via ContextMgr)
                  ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
 
-                std::println("[ScriptEngine] Mod started via ContextMgr: {}", modName);
+                Log::Info("[ScriptEngine] Mod started via ContextMgr: {}", modName.c_str());
                 return {};
             }
-            std::println(stderr, "[ScriptEngine] Failed to create context for {}", modName);
+            Log::Error("[ScriptEngine] Failed to create context for {}", modName.c_str());
             return eastl::unexpected(ExecutionError::FailCreateContext);
         }
         
@@ -355,7 +356,7 @@ namespace AngelEngine
             auto resultStartModContext = StartModContext(engine, modName.c_str());
             if (!resultStartModContext.has_value())
             {
-                std::println(stderr, "[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
+                Log::Error("[ExecutionManager] Failed to start mod, error code: {}", static_cast<int>(resultStartModContext.error()));
                 return eastl::unexpected(ExecutionError::FailRunMod);
             }
             return {};

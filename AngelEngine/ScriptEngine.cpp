@@ -2,6 +2,7 @@ module;
 
 #include <filesystem>
 #include <mutex>
+#include <format>
 
 #include <as_jit.h>
 #include <angelscript.h>
@@ -22,6 +23,8 @@ import AngelEngine.ReloadManager;
 import AngelEngine.SaveLoadManager;
 import AngelEngine.Interfaces;
 import AngelEngine.EventsBinding;
+import AngelEngine.ScriptWatcher;
+import AngelEngine.Logger;
 
 namespace fs = std::filesystem;
 
@@ -93,6 +96,12 @@ namespace AngelEngine
         void Tick(float deltaTime) override
         {
             std::scoped_lock lock(mutex_);
+            
+            // Check for auto-reload
+            if (scriptWatcher_ && scriptWatcher_->CheckAndResetReloadFlag())
+            {
+                HotReload();
+            }
             
             // Push Tick Event to Channel
             if (eventBinding_)
@@ -220,7 +229,9 @@ namespace AngelEngine
             useJit_(useJit),
             useAutoGC_(useAutoGC)
         {
+            // Create components first to check config
             moduleLoader_ = factory->CreateModuleLoader();
+            
             executionManager_ = factory->CreateExecutionManager();
             reloadManager_ = factory->CreateReloadManager();
             saveLoadManager_ = factory->CreateSaveLoadManager();
@@ -228,6 +239,8 @@ namespace AngelEngine
             eventManager_ = factory->CreateEventManager();
 
             eventBinding_ = eastl::make_unique<EventBinding>(eventManager_.get());
+            
+            scriptWatcher_ = factory->CreateScriptWatcher();
         }
 
         static void MessageCallback(const asSMessageInfo* msg, void* param)
@@ -334,5 +347,8 @@ namespace AngelEngine
         eastl::unique_ptr<IEventManager> eventManager_;
         
         eastl::unique_ptr<IScriptBinding> eventBinding_;
+        
+        // Watcher
+        eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
     };
 }
