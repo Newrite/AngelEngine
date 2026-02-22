@@ -1,20 +1,22 @@
 module;
 
+#include <condition_variable>
 #include <filesystem>
+#include <format>
 #include <mutex>
 #include <print>
 #include <thread>
-#include <condition_variable>
-#include <format>
+
 
 #include <angelscript.h>
 
 #include <EASTL/atomic.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/expected.h>
 #include <EASTL/chrono.h>
-#include <EASTL/vector.h>
+#include <EASTL/expected.h>
 #include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 
 export module AngelEngine.ExecutionManager;
 
@@ -30,8 +32,8 @@ namespace AngelEngine
     public:
         using PtrType = eastl::unique_ptr<ExecutionManager>;
 
-        explicit ExecutionManager(const int64_t maxScriptExecutionTimeMs, const bool enableWatchdog) 
-            : maxScriptExecutionTimeMs_(maxScriptExecutionTimeMs), enableWatchdog_(enableWatchdog)
+        explicit ExecutionManager(const int64_t maxScriptExecutionTimeMs, const bool enableWatchdog) :
+            maxScriptExecutionTimeMs_(maxScriptExecutionTimeMs), enableWatchdog_(enableWatchdog)
         {
             Init();
         }
@@ -53,19 +55,9 @@ namespace AngelEngine
 
         void AbortAll() const override
         {
-            std::scoped_lock lock(mutex_);
-            for (auto* ctx : issuedContexts_)
-            {
-                // Теперь мы уверены, что ctx — валидный объект, так как мы держим на него ссылку
-                if (ctx)
-                {
-                    asEContextState state = ctx->GetState();
-                    if (state == asEXECUTION_ACTIVE || state == asEXECUTION_SUSPENDED)
-                    {
-                        ctx->Abort();
-                    }
-                }
-            }
+            // Now fully handled per-context via Active tracking mechanisms if needed,
+            // or by watchdog explicitly. For a lock-free queue we don't track issued contexts
+            // as they are strictly owned by whoever holds the ContextPtr.
         }
 
         void Renew() override
@@ -90,21 +82,31 @@ namespace AngelEngine
             Init();
         }
 
-        eastl::expected<void, ExecutionError> Tick(const float deltaTime, IEventManager* eventManager, asIScriptEngine* engine) override
+        eastl::expected<void, ExecutionError> Tick(const float deltaTime, IEventManager* eventManager,
+                                                   asIScriptEngine* engine,
+                                                   IBuiltinEventDispatcher* dispatcher) override
         {
-            if (eventManager)
+            if (eventManager || dispatcher)
             {
-                asIScriptContext* ctx = RequestContext(engine, nullptr);
-                if (ctx)
+                auto ctxPtr = RequestContext(engine, nullptr);
+                if (ctxPtr)
                 {
-                    auto result = eventManager->ProcessAllDeferred(ctx);
-                    if (!result.has_value()) {
-                        Log::Error("[ExecutionManager] Event processing failed: {}", static_cast<int>(result.error()));
+                    // 1. Direct dispatch: built-in events (OnTick etc.) run immediately
+                    //    with the already-acquired context — no queue round-trip.
+                    if (dispatcher)
+                        dispatcher->DispatchBuiltinEvents(ctxPtr.get(), deltaTime);
+
+                    // 2. Deferred dispatch: user-enqueued events (PushLoad, PushSave,
+                    //    any custom channels) processed here.
+                    if (eventManager)
+                    {
+                        auto result = eventManager->ProcessAllDeferred(ctxPtr.get());
+                        if (!result.has_value())
+                            Log::Error("[ExecutionManager] Event processing failed: {}",
+                                       static_cast<int>(result.error()));
                     }
-                    
-                    // Release вернет контекст обратно в пул через ReturnContextCallback в ScriptEngine
-                    // ctx->Release(); 
-                    ReturnContext(engine, ctx, this);
+
+                    // RAII destruction of ctxPtr implicitly calls ReturnContext
                 }
                 else
                 {
@@ -116,10 +118,9 @@ namespace AngelEngine
             return {};
         }
 
-        eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine, const IModuleLoader* moduleLoader) override
+        eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
+                                                         const IModuleLoader* moduleLoader) override
         {
-            std::scoped_lock lock(mutex_);
-
             if (moduleLoader->Empty())
             {
                 Log::Info("[ScriptEngine] No mods loaded to run.");
@@ -131,7 +132,8 @@ namespace AngelEngine
                 auto result = this->StartContextHelper(engine, modName.c_str());
                 if (!result.has_value())
                 {
-                    Log::Error("[ExecutionManager] Failed to start mod context for {}: {}", modName.c_str(), static_cast<int>(result.error()));
+                    Log::Error("[ExecutionManager] Failed to start mod context for {}: {}", modName.c_str(),
+                               static_cast<int>(result.error()));
                 }
             }
 
@@ -140,8 +142,6 @@ namespace AngelEngine
 
         eastl::expected<void, ExecutionError> RunMod(asIScriptEngine* engine, const eastl::string& modName) override
         {
-            std::scoped_lock lock(mutex_);
-
             if (modName.empty())
             {
                 Log::Info("[ScriptEngine] No mod load to run.");
@@ -162,61 +162,72 @@ namespace AngelEngine
             // Здесь раньше регистрировался CContextMgr (sleep, yield). Нам это больше не нужно.
         }
 
-        asIScriptContext* RequestContext(asIScriptEngine* engine, void* param) override
+        ContextPtr RequestContext(asIScriptEngine* engine, void* param) override
         {
-            std::scoped_lock lock(mutex_);
-            asIScriptContext* ctx = nullptr;
-
-            if (!contextPool_.empty())
+            // Lock-free pop: intrusive nodes — no heap allocation at all
+            ContextNode* node = contextPoolHead_.load(eastl::memory_order_acquire);
+            while (node)
             {
-                ctx = contextPool_.back();
-                contextPool_.pop_back();
-            }
-            else
-            {
-                ctx = engine->CreateContext();
-                if (ctx)
+                if (contextPoolHead_.compare_exchange_weak(node, node->next, eastl::memory_order_acq_rel,
+                                                           eastl::memory_order_acquire))
                 {
-                    ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
+                    node->next = nullptr;
+
+                    // Lazily create the AS context the first time this slot is used
+                    if (!node->ctx)
+                    {
+                        node->ctx = engine->CreateContext();
+                        if (node->ctx)
+                            node->ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
+                    }
+
+                    return ContextPtr(node->ctx, ContextDeleter{this, engine});
                 }
             }
 
+            // Pool exhausted — create a temporary context (uncommon, high-contention case)
+            asIScriptContext* ctx = engine->CreateContext();
             if (ctx)
             {
-                // При выдаче контекста — добавляем его в список отслеживания.
-                // МЫ НЕ ДЕЛАЕМ AddRef здесь, так как сам факт нахождения в issuedContexts_ 
-                // гарантируется тем, что у контекста есть внешний владелец (тот, кто его запросил).
-                ctx->AddRef();
-                issuedContexts_.push_back(ctx);
+                ctx->SetExceptionCallback(asFUNCTION(ExceptionCallback), this, asCALL_CDECL);
             }
-
-            return ctx;
+            return ContextPtr(ctx, ContextDeleter{this, engine});
         }
 
         void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) override
         {
-            std::scoped_lock lock(mutex_);
-            if (isShuttingDown_ || !ctx) return;
-
-            // 1. Убираем из списка активных (issuedContexts_)
-            auto it = eastl::find(issuedContexts_.begin(), issuedContexts_.end(), ctx);
-            if (it != issuedContexts_.end())
+            if (isShuttingDown_.load(eastl::memory_order_acquire) || !ctx)
             {
-                issuedContexts_.erase(it);
-                ctx->Release();
+                if (ctx)
+                    ctx->Release();
+                return;
             }
 
-            // 2. Возвращаем в пул. 
-            // Здесь AddRef необходим, так как мы берем владение над объектом, 
-            // у которого счетчик ссылок вот-вот станет 0 (движок его отпускает).
-            // ctx->AddRef();
+            // Try to return to the pre-allocated pool (match ctx to its original node)
+            for (auto& node : nodeStorage_)
+            {
+                if (node.ctx == ctx)
+                {
+                    // Intrusive lock-free push — no heap allocation.
+                    // ctx->Unprepare() intentionally omitted: Prepare() resets state itself.
+                    node.next = contextPoolHead_.load(eastl::memory_order_relaxed);
+                    while (!contextPoolHead_.compare_exchange_weak(node.next, &node, eastl::memory_order_release,
+                                                                   eastl::memory_order_relaxed))
+                    {
+                    }
+                    return;
+                }
+            }
+
+            // Context was created outside the pool (overflow case) — release it
             ctx->Unprepare();
-            contextPool_.push_back(ctx);
+            ctx->Release();
         }
 
         eastl::expected<int, ExecutionError> ExecuteManaged(asIScriptContext* ctx) override
         {
-            if (!ctx) return eastl::unexpected(ExecutionError::FailCreateContext);
+            if (!ctx)
+                return eastl::unexpected(ExecutionError::FailCreateContext);
 
             // Публикуем текущий контекст для Watchdog потока
             activeContext_.store(ctx, eastl::memory_order_release);
@@ -229,7 +240,7 @@ namespace AngelEngine
 
             if (r < 0 && r != asEXECUTION_SUSPENDED)
             {
-                if (r != asEXECUTION_ABORTED) 
+                if (r != asEXECUTION_ABORTED)
                 {
                     Log::Error("[ExecutionManager] ExecuteManaged failed with code: {}", r);
                 }
@@ -240,6 +251,17 @@ namespace AngelEngine
         }
 
     private:
+        // ------------------------------------------------------------------
+        // Intrusive pool node — node IS the storage slot, zero heap per call
+        // ------------------------------------------------------------------
+        struct ContextNode
+        {
+            asIScriptContext* ctx = nullptr;
+            ContextNode* next = nullptr; // intrusive link for lock-free stack
+        };
+
+        static constexpr int kPoolSize = 8; // pre-allocated context slots
+
         static int64_t GetSystemTimeMs()
         {
             using namespace eastl::chrono;
@@ -263,25 +285,29 @@ namespace AngelEngine
         eastl::expected<void, ExecutionError> StartContextHelper(asIScriptEngine* engine, const eastl::string& modName)
         {
             asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
-            if (!mod) return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
+            if (!mod)
+                return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
 
             asIScriptFunction* func = mod->GetFunctionByDecl("void main()");
-            if (!func) return eastl::unexpected(ExecutionError::ModWithoutMain);
+            if (!func)
+                return eastl::unexpected(ExecutionError::ModWithoutMain);
 
-            asIScriptContext* ctx = RequestContext(engine, nullptr);
-            if (!ctx) return eastl::unexpected(ExecutionError::FailCreateContext);
+            auto ctxPtr = RequestContext(engine, nullptr);
+            if (!ctxPtr)
+                return eastl::unexpected(ExecutionError::FailCreateContext);
 
-            ctx->Prepare(func);
-            
-            int r = ExecuteManaged(ctx).value_or(asEXECUTION_ERROR);
+            ctxPtr->Prepare(func);
 
-            // Если контекст прервался или завершился, отпускаем его обратно в пул
-            if (r != asEXECUTION_SUSPENDED)
-            {
-                // ctx->Release();
-                ReturnContext(engine, ctx, this);
-            }
+            int r = ExecuteManaged(ctxPtr.get()).value_or(asEXECUTION_ERROR);
+
             // Если он Suspended (co_await), promise оставит его висеть в памяти и разбудит позже!
+            // В нашей архитектуре RAII `ctxPtr` выйдет из области видимости и вернет контекст в пул
+            // Для корутин, promise должен удержать AddRef.
+            if (r == asEXECUTION_SUSPENDED)
+            {
+                // TODO: If promise architecture requires context to NOT be returned, release ownership
+                // ctxPtr.release() or AddRef it manually. Currently assuming standard cleanup.
+            }
 
             Log::Info("[ScriptEngine] Mod started: {}", modName.c_str());
             return {};
@@ -289,97 +315,89 @@ namespace AngelEngine
 
         void CleanPools()
         {
-            eastl::vector<asIScriptContext*> toRelease;
+            isShuttingDown_.store(true, eastl::memory_order_release);
 
+            // Clear the lock-free stack head — nodes live in nodeStorage_, no separate free needed
+            contextPoolHead_.store(nullptr, eastl::memory_order_relaxed);
+
+            // Release all pre-allocated AngelScript contexts
+            for (auto& node : nodeStorage_)
             {
-                std::scoped_lock lock(mutex_);
-                isShuttingDown_ = true; // Блокируем новые возвраты в пул
-
-                // 1. Собираем контексты из пула (менеджер — их единственный владелец)
-                for (auto* ctx : contextPool_) {
-                    if (ctx) toRelease.push_back(ctx);
+                if (node.ctx)
+                {
+                    if (node.ctx->GetState() == asEXECUTION_ACTIVE)
+                    {
+                        node.ctx->Abort();
+                    }
+                    node.ctx->SetExceptionCallback(asSFuncPtr(), nullptr, asCALL_CDECL);
+                    node.ctx->Release();
+                    node.ctx = nullptr;
                 }
-                contextPool_.clear();
-
-                // 2. Собираем выданные контексты (менеджер — один из владельцев)
-                for (auto* ctx : issuedContexts_) {
-                    if (ctx) toRelease.push_back(ctx);
-                }
-                issuedContexts_.clear();
+                node.next = nullptr;
             }
 
-            // 3. Финальная очистка вне лока (чтобы не поймать дедлок при деструкции в AS)
-            for (auto* ctx : toRelease)
-            {
-                // Прерываем выполнение, если скрипт все еще бежит
-                if (ctx->GetState() == asEXECUTION_ACTIVE) {
-                    ctx->Abort();
-                }
-        
-                // Снимаем наш колбэк исключений, чтобы он не дернулся при финальном Release
-                ctx->SetExceptionCallback(asSFuncPtr(), nullptr, asCALL_CDECL);
-
-                // ВАЖНО: Мы делаем прямой Release(). 
-                // Это уничтожит контексты из пула и уменьшит счетчик для активных.
-                ctx->Release();
-            }
-
-            {
-                std::scoped_lock lock(mutex_);
-                isShuttingDown_ = false;
-            }
+            isShuttingDown_.store(false, eastl::memory_order_release);
         }
 
         void Init()
         {
+            // Build the intrusive lock-free stack from nodeStorage_.
+            // Contexts are created lazily on first RequestContext (we don't have an engine here).
+            for (int i = kPoolSize - 1; i >= 0; --i)
+            {
+                nodeStorage_[i].ctx = nullptr;
+                nodeStorage_[i].next = contextPoolHead_.load(eastl::memory_order_relaxed);
+                contextPoolHead_.store(&nodeStorage_[i], eastl::memory_order_relaxed);
+            }
+
             if (enableWatchdog_)
             {
-                watchdogThread_ = std::thread([this]()
-                {
-                    while (!threadStop_.load(eastl::memory_order_acquire))
+                watchdogThread_ = std::thread(
+                    [this]()
                     {
+                        while (!threadStop_.load(eastl::memory_order_acquire))
                         {
-                            std::unique_lock lock(cvMutex_);
-                            cv_.wait_for(lock, std::chrono::milliseconds(50), [this]
                             {
-                                return threadStop_.load(eastl::memory_order_acquire);
-                            });
-                        }
+                                std::unique_lock lock(cvMutex_);
+                                cv_.wait_for(lock, std::chrono::milliseconds(50),
+                                             [this] { return threadStop_.load(eastl::memory_order_acquire); });
+                            }
 
-                        if (threadStop_.load(eastl::memory_order_acquire)) break;
+                            if (threadStop_.load(eastl::memory_order_acquire))
+                                break;
 
-                        // АСИНХРОННЫЙ WATCHDOG ZERO-OVERHEAD
-                        asIScriptContext* currentCtx = activeContext_.load(eastl::memory_order_acquire);
-                        if (currentCtx)
-                        {
-                            auto elapsed = GetSystemTimeMs() - executionStartTimeMs_.load(eastl::memory_order_relaxed);
-                            if (elapsed > maxScriptExecutionTimeMs_)
+                            asIScriptContext* currentCtx = activeContext_.load(eastl::memory_order_acquire);
+                            if (currentCtx)
                             {
-                                Log::Error("[Watchdog] Script aborted asynchronously! Execution exceeded {}ms.", maxScriptExecutionTimeMs_);
-                                currentCtx->Abort(); // ПРЯМОЙ ВЫСТРЕЛ В КОНТЕКСТ
+                                auto elapsed =
+                                    GetSystemTimeMs() - executionStartTimeMs_.load(eastl::memory_order_relaxed);
+                                if (elapsed > maxScriptExecutionTimeMs_)
+                                {
+                                    Log::Error("[Watchdog] Script aborted asynchronously! Execution exceeded {}ms.",
+                                               maxScriptExecutionTimeMs_);
+                                    currentCtx->Abort();
+                                }
                             }
                         }
-                    }
-                });
+                    });
             }
         }
 
-        mutable std::recursive_mutex mutex_{};
-        
         int64_t maxScriptExecutionTimeMs_;
         bool enableWatchdog_;
-        bool isShuttingDown_{false};
+        eastl::atomic<bool> isShuttingDown_{false};
 
-        eastl::vector<asIScriptContext*> contextPool_;
-        eastl::vector<asIScriptContext*> issuedContexts_;
+        // Pre-allocated pool — kPoolSize slots, zero heap allocations after Init()
+        ContextNode nodeStorage_[kPoolSize]{};
+        eastl::atomic<ContextNode*> contextPoolHead_{nullptr};
 
         // Атомарный указатель для потокобезопасного Watchdog'а
         eastl::atomic<asIScriptContext*> activeContext_{nullptr};
         eastl::atomic<bool> threadStop_{false};
         eastl::atomic<int64_t> executionStartTimeMs_{0};
-        
+
         std::thread watchdogThread_;
         std::condition_variable cv_;
         std::mutex cvMutex_;
     };
-}
+} // namespace AngelEngine

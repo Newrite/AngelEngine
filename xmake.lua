@@ -222,8 +222,11 @@ target("AngelEngine")
 target("AngelEngineTest")
     set_kind("binary")
     
-    add_files("AngelEngineTest/**.cpp")
-    add_headerfiles("AngelEngineTest/TestContext.hpp")
+    add_files("AngelEngineTest/main.cpp")
+    add_files("AngelEngineTest/TestEventBinding.cpp")
+    add_files("AngelEngineTest/Tests_*.cpp")
+    add_files("AngelEngineTest/E2E_*.cpp")
+    add_headerfiles("AngelEngineTest/*.hpp")
     add_deps("AngelEngine")
     
     add_includedirs("GitModules/asbind20/include")

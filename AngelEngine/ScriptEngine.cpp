@@ -1,7 +1,7 @@
 module;
 
 #include <format>
-#include <mutex>
+#include <shared_mutex>
 
 
 // ЗАМЕНИЛИ <as_jit.h> на <angelsea.hpp>
@@ -68,7 +68,7 @@ namespace AngelEngine
 
         void AddListener(IEngineListener* listener) override
         {
-            std::scoped_lock lock(mutex_);
+            std::unique_lock lock(mutex_);
             if (listener && eastl::find(listeners_.begin(), listeners_.end(), listener) == listeners_.end())
             {
                 listeners_.push_back(listener);
@@ -77,13 +77,13 @@ namespace AngelEngine
 
         void RemoveListener(IEngineListener* listener) override
         {
-            std::scoped_lock lock(mutex_);
+            std::unique_lock lock(mutex_);
             listeners_.erase(eastl::remove(listeners_.begin(), listeners_.end(), listener), listeners_.end());
         }
 
         void CallGarbageCollectorFullCycle() override
         {
-            std::scoped_lock lock(mutex_);
+            std::unique_lock lock(mutex_);
             int r = engine_->GarbageCollect();
             if (r < 0)
                 Log::Error("[ScriptEngine] GarbageCollect failed with code: {}", r);
@@ -91,26 +91,15 @@ namespace AngelEngine
 
         void CallGarbageColletorOneStep() override
         {
-            std::scoped_lock lock(mutex_);
+            std::unique_lock lock(mutex_);
             int r = engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
             if (r < 0)
                 Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
         }
 
-        void PushTick(float deltaTime)
-        {
-            std::scoped_lock lock(mutex_);
-
-            if (eventBinding_)
-            {
-                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
-            }
-        }
 
         eastl::expected<void, EngineError> Tick(float deltaTime) override
         {
-            std::scoped_lock lock(mutex_);
-
             if (scriptWatcher_ && scriptWatcher_->CheckAndResetReloadFlag())
             {
                 auto reloadResult = HotReload();
@@ -121,12 +110,15 @@ namespace AngelEngine
                 }
             }
 
-            if (eventBinding_)
-            {
-                static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
-            }
+            std::shared_lock lock(mutex_);
 
-            auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get());
+            // eventBinding_ implements IBuiltinEventDispatcher — ExecutionManager::Tick
+            // calls DispatchBuiltinEvents(ctx, dt) directly with its pooled context.
+            // No more Enqueue + queue swap for OnTick.
+            IBuiltinEventDispatcher* dispatcher =
+                eventBinding_ ? static_cast<EventBinding*>(eventBinding_.get()) : nullptr;
+
+            auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get(), dispatcher);
 
             FrameMemoryPool::Get().Reset();
 
@@ -141,7 +133,7 @@ namespace AngelEngine
 
         eastl::expected<void, EngineError> RunAllMods() override
         {
-            std::scoped_lock lock(mutex_);
+            std::shared_lock lock(mutex_);
 
             auto resultRunMods = executionManager_->RunAllMods(engine_.get(), moduleLoader_.get());
             if (!resultRunMods.has_value())
@@ -155,7 +147,7 @@ namespace AngelEngine
 
         eastl::expected<void, EngineError> RunMod(const eastl::string& modName) override
         {
-            std::scoped_lock lock(mutex_);
+            std::shared_lock lock(mutex_);
 
             auto resultRunMod = executionManager_->RunMod(engine_.get(), modName);
             if (!resultRunMod.has_value())
@@ -170,7 +162,7 @@ namespace AngelEngine
 
         eastl::expected<void, EngineError> CompileAllMods() override
         {
-            std::scoped_lock lock(mutex_);
+            std::unique_lock lock(mutex_);
 
             BroadcastCompilationStarted();
             auto resultCompileMods = moduleLoader_->CompileAllMods(engine_.get());
@@ -188,6 +180,7 @@ namespace AngelEngine
 
         eastl::expected<void, EngineError> HotReload() const override
         {
+            std::unique_lock lock(mutex_);
             BroadcastHotReloadStarted();
 
             auto resultHotReload = reloadManager_->ReloadScripts(engine_.get(), moduleLoader_.get(),
@@ -205,6 +198,7 @@ namespace AngelEngine
 
         void AddBinding(IScriptBinding* binding) const override
         {
+            std::unique_lock lock(mutex_);
             bindingManager_->AddBinding(binding);
             BroadcastAddBinding(binding);
         }
@@ -325,7 +319,10 @@ namespace AngelEngine
             ScriptEngine* self = static_cast<ScriptEngine*>(param);
             if (self && self->executionManager_)
             {
-                return self->executionManager_->RequestContext(engine, param);
+                // Engine requests context. We return raw pointer and engine takes ownership.
+                // Later it will be returned via ReturnContextCallback.
+                auto ctxPtr = self->executionManager_->RequestContext(engine, param);
+                return ctxPtr.release();
             }
             return nullptr;
         }
@@ -417,10 +414,9 @@ namespace AngelEngine
         eastl::unique_ptr<angelsea::Jit> jit_;
         eastl::unique_ptr<angelsea::JitConfig> jitConfig_;
 
-        AsEnginePtr engine_;
         EngineConfig engine_config_;
 
-        std::mutex mutex_;
+        mutable std::shared_mutex mutex_;
         eastl::vector<IEngineListener*> listeners_;
 
         eastl::unique_ptr<IModuleLoader> moduleLoader_;
@@ -432,5 +428,9 @@ namespace AngelEngine
 
         eastl::unique_ptr<IScriptBinding> eventBinding_;
         eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
+
+        // --- ANGELSCRIPT ENGINE ---
+        // Must be declared LAST so it's destroyed LAST after all bindings release their script_functions.
+        AsEnginePtr engine_;
     };
 } // namespace AngelEngine

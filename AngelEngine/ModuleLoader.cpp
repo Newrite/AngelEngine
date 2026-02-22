@@ -1,10 +1,11 @@
 module;
 
+#include <angelscript.h>
+#include <filesystem>
 #include <mutex>
 #include <print>
 #include <scriptbuilder.h>
-#include <filesystem>
-#include <angelscript.h>
+
 
 // Подключаем стандартные потоки для чтения файлов в память
 #include <fstream>
@@ -14,11 +15,14 @@ module;
 // (Убедись, что путь совпадает с тем, куда ты положил promise.hpp)
 #include "scriptpromise/aspromise.hpp"
 
-#include <EASTL/string.h>
-#include <EASTL/vector.h>
-#include <EASTL/map.h>
-#include <EASTL/unique_ptr.h>
+#include <EABase/eabase.h>
 #include <EASTL/expected.h>
+#include <EASTL/map.h>
+#include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
+
 
 export module AngelEngine.ModuleLoader;
 
@@ -34,26 +38,19 @@ namespace AngelEngine
     public:
         using PtrType = eastl::unique_ptr<ModuleLoader>;
 
-        explicit ModuleLoader(eastl::unique_ptr<IScriptSourceProvider> provider) 
-            : provider_(eastl::move(provider))
+        explicit ModuleLoader(eastl::unique_ptr<IScriptSourceProvider> provider) : provider_(eastl::move(provider))
         {
             builder_ = eastl::make_unique<CScriptBuilder>();
         }
-        
-        const eastl::vector<eastl::string>& GetLoadedModules() const override
-        {
-            return loaded_modules_;
-        }
-        
-        bool Empty() const override
-        {
-            return loaded_modules_.empty();
-        }
+
+        const eastl::vector<eastl::string>& GetLoadedModules() const override { return loaded_modules_; }
+
+        bool Empty() const override { return loaded_modules_.empty(); }
 
         const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const override
         {
             // Здесь мы добавили лок в прошлом шаге для потокобезопасности
-            std::scoped_lock lock(mutex_); 
+            std::scoped_lock lock(mutex_);
             auto it = saveable_vars_cache_.find(modName);
             if (it != saveable_vars_cache_.end())
             {
@@ -97,51 +94,56 @@ namespace AngelEngine
         eastl::expected<void, ModuleLoaderError> LoadScriptsFromProvider(const fs::path& rootPath) const
         {
             auto scripts = provider_->GetScriptFiles(rootPath);
-            if (scripts.empty()) return eastl::unexpected(ModuleLoaderError::LoadScriptError);
+            if (scripts.empty())
+                return eastl::unexpected(ModuleLoaderError::LoadScriptError);
 
             for (const auto& scriptPath : scripts)
             {
                 // 1. Читаем исходный код скрипта из файла в память
-                std::ifstream file(scriptPath);
+                std::ifstream file(scriptPath, std::ios::binary | std::ios::ate);
                 if (!file.is_open())
                 {
                     Log::Error("[ScriptEngine] Failed to open script file: {}", scriptPath.string().c_str());
                     return eastl::unexpected(ModuleLoaderError::LoadScriptError);
                 }
 
-                std::stringstream buffer;
-                buffer << file.rdbuf();
-                std::string code = buffer.str();
+                auto fileSize = file.tellg();
+                file.seekg(0, std::ios::beg);
+
+                eastl::string code;
+                code.resize(fileSize);
+                if (fileSize > 0)
+                {
+                    file.read(code.data(), fileSize);
+                }
 
                 // 2. Препроцессинг PROMISE (магия co_await)
                 size_t codeSize = code.size();
-                
+
                 // Функция AsGeneratePromiseEntrypoints выделит новую память под измененный код.
                 // Так как мы уже переопределили глобальные asAllocMem/asFreeMem на mimalloc в ScriptEngine,
                 // мы можем безопасно использовать дефолтные параметры аллокатора в функции.
-                char* processedCode = AsGeneratePromiseEntrypoints(
-                    code.c_str(), 
-                    &codeSize
-                );
+                char* processedCode = AsGeneratePromiseEntrypoints(code.c_str(), &codeSize);
 
                 // 3. Загружаем обработанный код в CScriptBuilder.
                 // Мы передаем scriptPath как имя секции, чтобы ошибки компиляции AS указывали на реальный файл.
-                int r = builder_->AddSectionFromMemory(scriptPath.string().c_str(), processedCode, static_cast<unsigned int>(codeSize), 0);
-                
+                int r = builder_->AddSectionFromMemory(scriptPath.string().c_str(), processedCode,
+                                                       static_cast<unsigned int>(codeSize), 0);
+
                 // 4. Обязательно освобождаем память, выделенную генератором
                 asFreeMem(processedCode);
 
                 if (r < 0)
                 {
-                    Log::Error("[ScriptEngine] Failed to add file: {} with AS code: {}", scriptPath.string().c_str(), r);
+                    Log::Error("[ScriptEngine] Failed to add file: {} with AS code: {}", scriptPath.string().c_str(),
+                               r);
                     return eastl::unexpected(ModuleLoaderError::LoadScriptError);
                 }
             }
             return {};
         }
 
-        eastl::expected<void, ModuleLoaderError> CompileSingleMod(asIScriptEngine* engine,
-                                                                const eastl::string& modName)
+        eastl::expected<void, ModuleLoaderError> CompileSingleMod(asIScriptEngine* engine, const eastl::string& modName)
         {
             int r = builder_->StartNewModule(engine, modName.c_str());
             if (r < 0)
@@ -149,7 +151,7 @@ namespace AngelEngine
                 Log::Error("[ScriptEngine] Failed to create module: {} with AS code: {}", modName.c_str(), r);
                 return eastl::unexpected(ModuleLoaderError::CreateModuleError);
             }
-            
+
             // Load Standard Lib
             auto stdLibPath = provider_->GetStdLibPath();
             auto loadStdResult = LoadScriptsFromProvider(stdLibPath);
@@ -185,7 +187,7 @@ namespace AngelEngine
                 for (int i = 0; i < globalVarCount; ++i)
                 {
                     std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
-                    
+
                     bool isSaveable = false;
                     for (const auto& meta : metadataList)
                     {
@@ -209,8 +211,8 @@ namespace AngelEngine
             }
             else
             {
-                 Log::Error("[ScriptEngine] Failed to retrieve module after build: {}", modName.c_str());
-                 return eastl::unexpected(ModuleLoaderError::BuildModuleError);
+                Log::Error("[ScriptEngine] Failed to retrieve module after build: {}", modName.c_str());
+                return eastl::unexpected(ModuleLoaderError::BuildModuleError);
             }
 
             Log::Info("[ScriptEngine] + Loaded mod: {}", modName.c_str());
@@ -223,4 +225,4 @@ namespace AngelEngine
         eastl::unique_ptr<CScriptBuilder> builder_;
         eastl::unique_ptr<IScriptSourceProvider> provider_;
     };
-}
+} // namespace AngelEngine

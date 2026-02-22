@@ -2,7 +2,7 @@
 
 #include <EASTL/string.h>
 #include <angelscript.h>
-#include <print>
+#include <asbind20/asbind.hpp>
 
 
 export module AngelEngineTest.EventsBinding;
@@ -16,8 +16,8 @@ namespace AngelEngineTest
     {
         constexpr uint32_t DeferredEvent = AngelEngine::HashString("DeferredEvent");
         constexpr uint32_t CustomEvent = AngelEngine::HashString("CustomEvent");
-    }
-    
+    } // namespace EventsName
+
     export class TestEventBinding final : public AngelEngine::IScriptBinding
     {
     public:
@@ -29,7 +29,7 @@ namespace AngelEngineTest
                 eventManager_->RegisterChannel(EventsName::DeferredEvent, &deferredEventChannel_);
             }
         }
-        
+
         ~TestEventBinding() override
         {
             if (eventManager_)
@@ -44,44 +44,42 @@ namespace AngelEngineTest
             engine->RegisterFuncdef("void CustomEventCallback(int, float)");
             engine->RegisterFuncdef("void DeferredCallback()");
 
-            int r = engine->RegisterGlobalFunction(
-                "void SubscribeCustomEvent(CustomEventCallback@+)", 
-                asMETHOD(TestEventBinding, SubscribeCustomEvent), 
-                asCALL_THISCALL_ASGLOBAL, 
-                this
-            );
-            if (r < 0) std::println(stderr, "[EventBinding] Failed to register SubscribeCustomEvent. Code: {}", r);
-            
-            r = engine->RegisterGlobalFunction(
-                "void SubscribeDeferredEvent(DeferredCallback@+)", 
-                asMETHOD(TestEventBinding, SubscribeDeferredEvent), 
-                asCALL_THISCALL_ASGLOBAL, 
-                this
-            );
-            if (r < 0) std::println(stderr, "[EventBinding] Failed to register SubscribeDeferredEvent. Code: {}", r);
+            asbind20::global(engine)
+                .function("void SubscribeCustomEvent(CustomEventCallback@+)", &TestEventBinding::SubscribeCustomEvent,
+                          asbind20::auxiliary(*this))
+                .function("void SubscribeDeferredEvent(DeferredCallback@+)", &TestEventBinding::SubscribeDeferredEvent,
+                          asbind20::auxiliary(*this));
         }
 
-        void SubscribeCustomEvent(asIScriptFunction* callback)
+        void SubscribeCustomEvent(asIScriptFunction* cb)
         {
-            if (!callback) return;
-            customEventChannel_.AddSubscriber(callback);
+            if (!cb)
+                return;
+            customEventChannel_.AddSubscriber(asbind20::script_function<void(int, float)>(cb));
         }
-        
-        void SubscribeDeferredEvent(asIScriptFunction* callback)
+
+        void SubscribeDeferredEvent(asIScriptFunction* cb)
         {
-            if (!callback) return;
-            deferredEventChannel_.AddSubscriber(callback);
+            if (!cb)
+                return;
+            deferredEventChannel_.AddSubscriber(asbind20::script_function<void()>(cb));
         }
 
         // Public accessors for pushing events
         void PushCustomEvent(int val1, float val2) { customEventChannel_.Enqueue(val1, val2); }
         void PushDeferredEvent() { deferredEventChannel_.Enqueue(); }
-    
+
+        void ClearAllEvents()
+        {
+            customEventChannel_.Clear();
+            deferredEventChannel_.Clear();
+        }
+
     private:
         AngelEngine::IEventManager* eventManager_;
-        
+
         // Channels
         AngelEngine::EventChannel<int, float> customEventChannel_;
         AngelEngine::EventChannel<> deferredEventChannel_;
     };
-}
+} // namespace AngelEngineTest
