@@ -1,18 +1,20 @@
 module;
 
-#include <filesystem>
-#include <mutex>
 #include <format>
+#include <mutex>
+
 
 // ЗАМЕНИЛИ <as_jit.h> на <angelsea.hpp>
-#include <angelsea.hpp>
 #include <angelscript.h>
+#include <angelsea.hpp>
 
-#include <EASTL/string.h>
-#include <EASTL/vector.h>
-#include <EASTL/unique_ptr.h>
+
 #include <EASTL/algorithm.h>
 #include <EASTL/expected.h>
+#include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 
 export module AngelEngine.ScriptEngine;
 
@@ -29,15 +31,14 @@ import AngelEngine.Logger;
 import AngelEngine.FrameAllocator;
 import AngelEngine.Memory;
 
-namespace fs = std::filesystem;
-
 namespace AngelEngine
 {
     struct AngelScriptDeleter
     {
         void operator()(asIScriptEngine* engine) const
         {
-            if (engine) engine->ShutDownAndRelease();
+            if (engine)
+                engine->ShutDownAndRelease();
         }
     };
 
@@ -59,10 +60,8 @@ namespace AngelEngine
 
             AsEnginePtr engine(rawEngine);
 
-            auto scriptEngine = eastl::unique_ptr<ScriptEngine>( new ScriptEngine (
-                eastl::move(engine),
-                eastl::move(factory)
-            ));
+            auto scriptEngine =
+                eastl::unique_ptr<ScriptEngine>(new ScriptEngine(eastl::move(engine), eastl::move(factory)));
 
             return scriptEngine;
         }
@@ -86,14 +85,16 @@ namespace AngelEngine
         {
             std::scoped_lock lock(mutex_);
             int r = engine_->GarbageCollect();
-            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect failed with code: {}", r);
+            if (r < 0)
+                Log::Error("[ScriptEngine] GarbageCollect failed with code: {}", r);
         }
 
         void CallGarbageColletorOneStep() override
         {
             std::scoped_lock lock(mutex_);
             int r = engine_->GarbageCollect(asEGCFlags::asGC_ONE_STEP);
-            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
+            if (r < 0)
+                Log::Error("[ScriptEngine] GarbageCollect (OneStep) failed with code: {}", r);
         }
 
         void PushTick(float deltaTime)
@@ -119,7 +120,7 @@ namespace AngelEngine
                                static_cast<int>(reloadResult.error()));
                 }
             }
-            
+
             if (eventBinding_)
             {
                 static_cast<EventBinding*>(eventBinding_.get())->PushTick(deltaTime);
@@ -225,11 +226,7 @@ namespace AngelEngine
                 return eastl::unexpected(EngineError::GenericError);
             }
 
-            r = engine_->SetContextCallbacks(
-                RequestContextCallback,
-                ReturnContextCallback,
-                this
-            );
+            r = engine_->SetContextCallbacks(RequestContextCallback, ReturnContextCallback, this);
             if (r < 0)
             {
                 Log::Error("[ScriptEngine] Failed to set context callbacks: {}", r);
@@ -248,7 +245,7 @@ namespace AngelEngine
 
                 jitConfig_ = eastl::make_unique<angelsea::JitConfig>();
 
-                // Для наших тестов производительности мы хотим, чтобы JIT компилировал функции сразу (AOT-style), 
+                // Для наших тестов производительности мы хотим, чтобы JIT компилировал функции сразу (AOT-style),
                 // а не ждал, пока они "прогреются".
                 jitConfig_->triggers.hits_before_func_compile = 0;
 
@@ -297,15 +294,12 @@ namespace AngelEngine
         }
 
     private:
-        explicit ScriptEngine(AsEnginePtr as_engine,
-                              eastl::unique_ptr<IEngineComponentFactory> factory) :
-            jit_(nullptr),
-            jitConfig_(nullptr),
-            engine_(eastl::move(as_engine))
+        explicit ScriptEngine(AsEnginePtr as_engine, eastl::unique_ptr<IEngineComponentFactory> factory) :
+            jit_(nullptr), jitConfig_(nullptr), engine_(eastl::move(as_engine))
         {
-            
+
             engine_config_ = factory->GetEngineConfig();
-            
+
             moduleLoader_ = factory->CreateModuleLoader();
             executionManager_ = factory->CreateExecutionManager();
             reloadManager_ = factory->CreateReloadManager();
@@ -377,38 +371,45 @@ namespace AngelEngine
 
         void BroadcastEngineInitialized() const
         {
-            for (auto* listener : listeners_) listener->OnEngineInitialized(
-                engine_.get(), bindingManager_.get(), moduleLoader_.get(), executionManager_.get());
+            for (auto* listener : listeners_)
+                listener->OnEngineInitialized(engine_.get(), bindingManager_.get(), moduleLoader_.get(),
+                                              executionManager_.get());
         }
 
         void BroadcastCompilationStarted() const
         {
-            for (auto* listener : listeners_) listener->OnCompilationStarted(engine_.get());
+            for (auto* listener : listeners_)
+                listener->OnCompilationStarted(engine_.get());
         }
 
         void BroadcastCompilationFinished(bool success) const
         {
-            for (auto* listener : listeners_) listener->OnCompilationFinished(engine_.get(), success);
+            for (auto* listener : listeners_)
+                listener->OnCompilationFinished(engine_.get(), success);
         }
 
         void BroadcastHotReloadStarted() const
         {
-            for (auto* listener : listeners_) listener->OnHotReloadStarted(engine_.get());
+            for (auto* listener : listeners_)
+                listener->OnHotReloadStarted(engine_.get());
         }
 
         void BroadcastHotReloadFinished() const
         {
-            for (auto* listener : listeners_) listener->OnHotReloadFinished(engine_.get());
+            for (auto* listener : listeners_)
+                listener->OnHotReloadFinished(engine_.get());
         }
 
         void BroadcastAddBinding(IScriptBinding* binding) const
         {
-            for (auto* listener : listeners_) listener->OnAddBinding(engine_.get(), binding);
+            for (auto* listener : listeners_)
+                listener->OnAddBinding(engine_.get(), binding);
         }
 
         void BroadcastScriptMessage(const asSMessageInfo* msg) const
         {
-            for (auto* listener : listeners_) listener->OnScriptMessage(engine_.get(), msg);
+            for (auto* listener : listeners_)
+                listener->OnScriptMessage(engine_.get(), msg);
         }
 
     private:
@@ -432,4 +433,4 @@ namespace AngelEngine
         eastl::unique_ptr<IScriptBinding> eventBinding_;
         eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
     };
-}
+} // namespace AngelEngine
