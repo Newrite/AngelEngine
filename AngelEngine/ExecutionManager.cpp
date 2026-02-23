@@ -284,11 +284,23 @@ namespace AngelEngine
 
         eastl::expected<void, ExecutionError> StartContextHelper(asIScriptEngine* engine, const eastl::string& modName)
         {
-            asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
+            asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
             if (!mod)
                 return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
 
-            asIScriptFunction* func = mod->GetFunctionByDecl("void main()");
+            // Attempt to find `void main()` in the module, potentially under the `modName` namespace
+            asIScriptFunction* func = nullptr;
+
+            // First try globally (for public APIs that aren't wrapped)
+            func = mod->GetFunctionByDecl("void main()");
+
+            // If not found, try within the namespace
+            if (!func)
+            {
+                eastl::string namespacedDecl = "void " + modName + "::main()";
+                func = mod->GetFunctionByDecl(namespacedDecl.c_str());
+            }
+
             if (!func)
                 return eastl::unexpected(ExecutionError::ModWithoutMain);
 

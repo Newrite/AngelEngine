@@ -1,16 +1,18 @@
 ﻿module;
 
+#include <chrono>
 #include <filesystem>
+#include <format>
+#include <print>
 #include <thread>
 #include <windows.h>
-#include <print>
-#include <chrono>
-#include <format>
+
 
 #include <EASTL/atomic.h>
-#include <EASTL/vector.h>
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 
 export module AngelEngine.ScriptWatcher;
 
@@ -22,14 +24,13 @@ namespace AngelEngine
     export class ScriptWatcher : public IScriptWatcher
     {
     public:
-        ScriptWatcher(const std::filesystem::path& stdPath, const std::filesystem::path& modPath)
+        ScriptWatcher(const std::filesystem::path& modPath)
         {
-            paths_.push_back(stdPath);
             paths_.push_back(modPath);
-            
+
             stopRequested_.store(false, eastl::memory_order_relaxed);
             reloadPending_.store(false, eastl::memory_order_relaxed);
-            
+
             watcherThread_ = std::thread([this]() { this->WatchLoop(); });
         }
 
@@ -42,10 +43,7 @@ namespace AngelEngine
             }
         }
 
-        bool CheckAndResetReloadFlag() override
-        {
-            return reloadPending_.exchange(false, eastl::memory_order_acquire);
-        }
+        bool CheckAndResetReloadFlag() override { return reloadPending_.exchange(false, eastl::memory_order_acquire); }
 
     private:
         void WatchLoop()
@@ -54,7 +52,7 @@ namespace AngelEngine
             eastl::vector<HANDLE> dirHandles;
             eastl::vector<OVERLAPPED> overlaps;
             eastl::vector<eastl::vector<uint8_t>> buffers;
-            
+
             // We need to store handles to close them later
             // But wait, we need to keep track of which handle corresponds to which path/overlap
             // The original code had logic issues with vectors resizing or moving if not careful.
@@ -66,15 +64,9 @@ namespace AngelEngine
 
             for (size_t i = 0; i < paths_.size(); ++i)
             {
-                HANDLE hDir = CreateFileW(
-                    paths_[i].c_str(),
-                    FILE_LIST_DIRECTORY,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    NULL,
-                    OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-                    NULL
-                );
+                HANDLE hDir = CreateFileW(paths_[i].c_str(), FILE_LIST_DIRECTORY,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                                          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
 
                 if (hDir == INVALID_HANDLE_VALUE)
                 {
@@ -85,21 +77,16 @@ namespace AngelEngine
                 dirHandles.push_back(hDir);
                 buffers[i].resize(1024); // 1KB buffer
                 ZeroMemory(&overlaps[i], sizeof(OVERLAPPED));
-                
+
                 // Create an event for the overlapped structure
                 overlaps[i].hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-                
+
                 // Issue initial read
-                BOOL success = ReadDirectoryChangesW(
-                    hDir,
-                    buffers[i].data(),
-                    static_cast<DWORD>(buffers[i].size()),
-                    TRUE, // Watch subtree
-                    FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_CREATION,
-                    NULL,
-                    &overlaps[i],
-                    NULL
-                );
+                BOOL success = ReadDirectoryChangesW(hDir, buffers[i].data(), static_cast<DWORD>(buffers[i].size()),
+                                                     TRUE, // Watch subtree
+                                                     FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME |
+                                                         FILE_NOTIFY_CHANGE_CREATION,
+                                                     NULL, &overlaps[i], NULL);
 
                 if (!success)
                 {
@@ -107,7 +94,8 @@ namespace AngelEngine
                 }
             }
 
-            if (dirHandles.empty()) return;
+            if (dirHandles.empty())
+                return;
 
             while (!stopRequested_.load(eastl::memory_order_acquire))
             {
@@ -115,59 +103,55 @@ namespace AngelEngine
                 // We construct an array of handles to wait on
                 eastl::vector<HANDLE> waitHandles;
                 waitHandles.reserve(overlaps.size());
-                for(const auto& ov : overlaps) 
+                for (const auto& ov : overlaps)
                 {
-                    if (ov.hEvent) waitHandles.push_back(ov.hEvent);
+                    if (ov.hEvent)
+                        waitHandles.push_back(ov.hEvent);
                 }
-                
-                if (waitHandles.empty()) break;
 
-                DWORD waitResult = WaitForMultipleObjects(
-                    static_cast<DWORD>(waitHandles.size()),
-                    waitHandles.data(),
-                    FALSE,
-                    200 // 200ms timeout to check stop flag
-                );
+                if (waitHandles.empty())
+                    break;
+
+                DWORD waitResult =
+                    WaitForMultipleObjects(static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE,
+                                           200 // 200ms timeout to check stop flag
+                    );
 
                 if (waitResult >= WAIT_OBJECT_0 && waitResult < WAIT_OBJECT_0 + waitHandles.size())
                 {
                     // Change detected!
                     size_t index = waitResult - WAIT_OBJECT_0;
-                    
+
                     // Debounce: Wait a bit to let file writes finish
                     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                    
+
                     // Set flag
                     reloadPending_.store(true, eastl::memory_order_release);
-                    
+
                     // Reset the event and reissue the read
                     ResetEvent(overlaps[index].hEvent);
-                    
+
                     // We don't strictly need to process the buffer content, just knowing something changed is enough
                     // But we must reissue the read to catch future changes
                     BOOL success = ReadDirectoryChangesW(
-                        dirHandles[index],
-                        buffers[index].data(),
-                        static_cast<DWORD>(buffers[index].size()),
-                        TRUE,
+                        dirHandles[index], buffers[index].data(), static_cast<DWORD>(buffers[index].size()), TRUE,
                         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_CREATION,
-                        NULL,
-                        &overlaps[index],
-                        NULL
-                    );
-                    
+                        NULL, &overlaps[index], NULL);
+
                     if (!success)
                     {
-                         Log::Error("[ScriptWatcher] Re-issuing ReadDirectoryChangesW failed.");
+                        Log::Error("[ScriptWatcher] Re-issuing ReadDirectoryChangesW failed.");
                     }
                 }
             }
 
             // Cleanup
-            for (HANDLE h : dirHandles) CloseHandle(h);
-            for (auto& ov : overlaps) 
+            for (HANDLE h : dirHandles)
+                CloseHandle(h);
+            for (auto& ov : overlaps)
             {
-                if (ov.hEvent) CloseHandle(ov.hEvent);
+                if (ov.hEvent)
+                    CloseHandle(ov.hEvent);
             }
         }
 
@@ -176,4 +160,4 @@ namespace AngelEngine
         eastl::atomic<bool> stopRequested_;
         eastl::atomic<bool> reloadPending_;
     };
-}
+} // namespace AngelEngine

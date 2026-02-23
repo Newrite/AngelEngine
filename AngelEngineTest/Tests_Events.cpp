@@ -18,8 +18,8 @@ TEST_CASE(Events, Dispatching)
         }
 
         void SubscribeToEvents() { 
-            SubscribeCustomEvent(@OnTestEvent); 
-            SubscribeDeferredEvent(@OnDeferredEvent); 
+            ::SubscribeCustomEvent(@OnTestEvent); 
+            ::SubscribeDeferredEvent(@OnDeferredEvent); 
         }
     )");
 
@@ -27,8 +27,8 @@ TEST_CASE(Events, Dispatching)
     auto res = fixture.engine->RunMod("EventTest");
     ASSERT_TRUE(res.has_value(), "EventTest failed to run");
 
-    asIScriptModule* eventMod = fixture.engine->GetEngine()->GetModule("EventTest");
-    asIScriptFunction* subFunc = eventMod->GetFunctionByDecl("void SubscribeToEvents()");
+    asIScriptModule* eventMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* subFunc = eventMod->GetFunctionByDecl("void EventTest::SubscribeToEvents()");
 
     {
         // ContextPtr is RAII — it auto-returns the context on scope exit. Do NOT call ReturnContext manually.

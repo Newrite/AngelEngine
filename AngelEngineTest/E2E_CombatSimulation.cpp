@@ -53,10 +53,10 @@ TEST_CASE(E2E, CombatSimulationWithGarbageCollection)
     auto ms = fixture.engine->RunMod("CombatSim");
     ASSERT_TRUE(ms.has_value(), "Failed to run CombatSim");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("CombatSim");
-    asIScriptFunction* spawnFunc = mod->GetFunctionByDecl("void SpawnWave(int)");
-    asIScriptFunction* combatFunc = mod->GetFunctionByDecl("void SimulateCombatRound()");
-    asIScriptFunction* countFunc = mod->GetFunctionByDecl("int GetActiveEntityCount()");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* spawnFunc = mod->GetFunctionByDecl("void CombatSim::SpawnWave(int)");
+    asIScriptFunction* combatFunc = mod->GetFunctionByDecl("void CombatSim::SimulateCombatRound()");
+    asIScriptFunction* countFunc = mod->GetFunctionByDecl("int CombatSim::GetActiveEntityCount()");
 
     // Spawn Wave
     auto ctxPtr = fixture.engine->GetExecutionManager()->RequestContext(fixture.engine->GetEngine(), nullptr);

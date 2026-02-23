@@ -1,19 +1,24 @@
 module;
 
-#include <EABASE/eabase.h>
+#include <EABase/eabase.h>
 #include <EASTL/expected.h>
 #include <EASTL/functional.h>
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
 #include <angelscript.h>
+#include <chrono>
+#include <eastl/memory.h>
+#include <eastl/type_traits.h>
 #include <filesystem>
+#include <mutex>
 
 
 export module AngelEngine.Interfaces;
 
 namespace AngelEngine
 {
+
     // --- Error Types ---
 
     export enum class ModuleLoaderError : std::uint8_t {
@@ -76,6 +81,22 @@ namespace AngelEngine
         GenericError
     };
 
+    // Describes how an event channel should appear in the AS-side dispatcher.
+    // Provided by each channel; collected by EventManager for code generation.
+    export struct ChannelDescriptor
+    {
+        eastl::string eventName; // e.g. "Tick"
+        eastl::string funcdefDecl; // e.g. "void TickCallback(float)"
+        eastl::string callbackType; // e.g. "TickCallback"
+        eastl::string argDecl; // e.g. "float dt"  (used in dispatcher function signature if not deferred)
+        eastl::string dispatchArgs; // e.g. "dt"        (passed to each subscriber call if not deferred)
+
+        // Batching parameters
+        bool isDeferred = false;
+        eastl::vector<eastl::string> argTypes; // e.g. {"Actor", "float"} (used to create array<T>@)
+        eastl::vector<eastl::string> argNames; // e.g. {"actor", "dt"}
+    };
+
     export enum class SerializationError : std::uint8_t {
         SaveFailed,
         LoadFailed,
@@ -88,7 +109,6 @@ namespace AngelEngine
 
     export struct EngineConfig final
     {
-        std::filesystem::path scriptsPathStd;
         std::filesystem::path scriptsPathMod;
         std::filesystem::path asPredefinedPath;
 
@@ -127,7 +147,6 @@ namespace AngelEngine
     export struct IScriptSourceProvider
     {
         virtual ~IScriptSourceProvider() = default;
-        virtual std::filesystem::path GetStdLibPath() const = 0;
         virtual eastl::vector<eastl::string> GetAvailableMods() const = 0;
         virtual std::filesystem::path GetModPath(const eastl::string& modName) const = 0;
         virtual eastl::vector<std::filesystem::path> GetScriptFiles(const std::filesystem::path& rootPath) const = 0;
@@ -155,17 +174,24 @@ namespace AngelEngine
     export struct IModuleLoader
     {
         virtual ~IModuleLoader() = default;
-        virtual eastl::expected<void, ModuleLoaderError> CompileAllMods(asIScriptEngine* engine) = 0;
+        virtual eastl::expected<void, ModuleLoaderError>
+        CompileAllMods(asIScriptEngine* engine, const eastl::vector<ChannelDescriptor>& eventDescriptors = {}) = 0;
         virtual const eastl::vector<eastl::string>& GetLoadedModules() const = 0;
         virtual bool Empty() const = 0;
         virtual const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const = 0;
+        virtual void RecordCompilationError(const eastl::string& sectionName) = 0;
     };
+
+    export struct IContextPooling;
 
     export struct IEventChannel
     {
         virtual ~IEventChannel() = default;
-        virtual eastl::expected<void, EventError> ProcessDeferred(asIScriptContext* ctx) = 0;
+        virtual eastl::expected<void, EventError> ProcessDeferred() = 0;
         virtual void Clear() = 0;
+        virtual ChannelDescriptor GetDescriptor() const = 0;
+        virtual void SetDispatcherFn(asIScriptEngine* engine, IContextPooling* pool, asIScriptFunction* fn) = 0;
+        virtual void WarmupJIT() = 0;
     };
 
     export struct IEventManager
@@ -178,6 +204,10 @@ namespace AngelEngine
 
         virtual eastl::expected<void, EventError> ProcessAllDeferred(asIScriptContext* sharedCtx) = 0;
         virtual void ClearAll() = 0;
+
+        // Returns descriptors for all currently registered channels.
+        // Used by ModuleLoader to generate the AS-side dispatcher code.
+        virtual eastl::vector<ChannelDescriptor> GetAllDescriptors() const = 0;
     };
 
     // Helper functions for EventChannel
@@ -195,6 +225,19 @@ namespace AngelEngine
     export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, uint64_t val) { ctx->SetArgQWord(argIndex, val); }
     export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, bool val) { ctx->SetArgByte(argIndex, val); }
     export inline void SetArg(asIScriptContext* ctx, asUINT argIndex, void* val) { ctx->SetArgAddress(argIndex, val); }
+
+    // Generic overload for value-type objects registered with asOBJ_VALUE.
+    // Less specialized than the above scalar overloads — compiler picks exact matches first.
+    // T must be registered in the AS engine via RegisterObjectType with asOBJ_VALUE.
+    export template <typename T>
+    inline void SetArg(asIScriptContext* ctx, asUINT argIndex, T& val)
+    {
+        // AngelScript's SetArgObject takes void*, but for value types (asOBJ_VALUE)
+        // it only reads the data to make a copy.
+        // We use const_cast here because EventChannel::ProcessDeferred passes
+        // elements from a const tuple/vector queue.
+        ctx->SetArgObject(argIndex, const_cast<void*>(static_cast<const void*>(&val)));
+    }
 
     export struct IContextPooling
     {
@@ -271,7 +314,7 @@ namespace AngelEngine
         explicit operator bool() const { return ctx_ != nullptr; }
 
         // Run the pre-prepared function, then re-Prepare for next call.
-        int Execute()
+        inline int Execute()
         {
             if (!ctx_)
                 return asERROR;
@@ -281,7 +324,10 @@ namespace AngelEngine
         }
 
         // Access raw context to set arguments before Execute().
-        asIScriptContext* Get() const { return ctx_; }
+        inline asIScriptContext* Get() const { return ctx_; }
+
+        // Access engine for type info lookups
+        inline asIScriptEngine* GetEngine() const { return engine_; }
 
     private:
         void Release()

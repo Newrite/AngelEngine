@@ -32,13 +32,13 @@ TEST_CASE(SaveLoad, SaveDataAndHotReload)
     auto runRes = fixture.engine->RunMod("TestMod");
     ASSERT_TRUE(runRes.has_value(), "Run failed.");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("TestMod");
-    ASSERT_TRUE(mod != nullptr, "Module TestMod not found");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    ASSERT_TRUE(mod != nullptr, "Module __Megamodule__ not found");
 
-    int varIdx = mod->GetGlobalVarIndexByName("globalCounter");
+    int varIdx = mod->GetGlobalVarIndexByName("TestMod::globalCounter");
     int* counterPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 
-    int actorIdx = mod->GetGlobalVarIndexByName("savedActor");
+    int actorIdx = mod->GetGlobalVarIndexByName("TestMod::savedActor");
     MockActor** actorPtr = (MockActor**)mod->GetAddressOfGlobalVar(actorIdx);
 
     fixture.engine->Tick(
@@ -58,11 +58,11 @@ TEST_CASE(SaveLoad, SaveDataAndHotReload)
     auto reloadRes = fixture.engine->HotReload();
     ASSERT_TRUE(reloadRes.has_value(), "HotReload failed");
 
-    mod = fixture.engine->GetEngine()->GetModule("TestMod");
-    varIdx = mod->GetGlobalVarIndexByName("globalCounter");
+    mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    varIdx = mod->GetGlobalVarIndexByName("TestMod::globalCounter");
     counterPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 
-    actorIdx = mod->GetGlobalVarIndexByName("savedActor");
+    actorIdx = mod->GetGlobalVarIndexByName("TestMod::savedActor");
     actorPtr = (MockActor**)mod->GetAddressOfGlobalVar(actorIdx);
 
     EXPECT_EQ(*counterPtr, 42, "globalCounter should re-initialize to 42 post-reload");

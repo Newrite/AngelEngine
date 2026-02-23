@@ -15,6 +15,8 @@ module;
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
 
+#include "NativeViewArray.h"
+
 
 export module AngelEngine.ScriptEngine;
 
@@ -164,8 +166,14 @@ namespace AngelEngine
         {
             std::unique_lock lock(mutex_);
 
+            // Gather AS event descriptors from all registered channels.
+            // These drive the auto-generated __dispatcher__ section injected by ModuleLoader.
+            eastl::vector<ChannelDescriptor> descriptors;
+            if (eventManager_)
+                descriptors = eventManager_->GetAllDescriptors();
+
             BroadcastCompilationStarted();
-            auto resultCompileMods = moduleLoader_->CompileAllMods(engine_.get());
+            auto resultCompileMods = moduleLoader_->CompileAllMods(engine_.get(), descriptors);
             BroadcastCompilationFinished(resultCompileMods.has_value());
 
             if (!resultCompileMods.has_value())
@@ -174,6 +182,12 @@ namespace AngelEngine
                            static_cast<int>(resultCompileMods.error()));
                 return eastl::unexpected(EngineError::FailCompileMods);
             }
+
+            // Wire AS dispatcher function pointers into each EventChannel.
+            // After this, each channel's Dispatch() / ProcessDeferred() calls the
+            // AS dispatcher (1 C++→AS hop) instead of N individual subscribers.
+            if (!descriptors.empty())
+                WireDispatchers(descriptors);
 
             return {};
         }
@@ -185,6 +199,14 @@ namespace AngelEngine
 
             auto resultHotReload = reloadManager_->ReloadScripts(engine_.get(), moduleLoader_.get(),
                                                                  executionManager_.get(), eventManager_.get());
+
+            if (resultHotReload.has_value() && eventManager_)
+            {
+                auto descriptors = eventManager_->GetAllDescriptors();
+                if (!descriptors.empty())
+                    WireDispatchers(descriptors);
+            }
+
             BroadcastHotReloadFinished();
 
             if (!resultHotReload.has_value())
@@ -275,21 +297,24 @@ namespace AngelEngine
 
             executionManager_->RegisterThreadSupport(engine_.get());
 
+            RegisterNativeViewArray();
+
             auto bindResult = BindAll();
             if (!bindResult.has_value())
             {
                 return eastl::unexpected(EngineError::GenericError);
             }
 
-            GenerateScriptPredefined(engine_.get(), engine_config_.asPredefinedPath);
             BroadcastEngineInitialized();
 
             return {};
         }
 
+        void GeneratePredefined() { GenerateScriptPredefined(engine_.get(), engine_config_.asPredefinedPath); }
+
     private:
         explicit ScriptEngine(AsEnginePtr as_engine, eastl::unique_ptr<IEngineComponentFactory> factory) :
-            jit_(nullptr), jitConfig_(nullptr), engine_(eastl::move(as_engine))
+            jitConfig_(nullptr), jit_(nullptr), engine_(eastl::move(as_engine))
         {
 
             engine_config_ = factory->GetEngineConfig();
@@ -307,9 +332,18 @@ namespace AngelEngine
 
         static void MessageCallback(const asSMessageInfo* msg, void* param)
         {
+            if (msg->type == asMSGTYPE_ERROR)
+            {
+                std::printf("[AS-COMPILER-ERROR] %s (%d, %d): %s\n", msg->section, msg->row, msg->col, msg->message);
+            }
+
             ScriptEngine* self = static_cast<ScriptEngine*>(param);
             if (self)
             {
+                if (msg->type == asMSGTYPE_ERROR && self->moduleLoader_)
+                {
+                    self->moduleLoader_->RecordCompilationError(msg->section);
+                }
                 self->BroadcastScriptMessage(msg);
             }
         }
@@ -366,6 +400,69 @@ namespace AngelEngine
             }
         }
 
+        // Wire AS dispatcher function pointers into each EventChannel after compile.
+        // For each descriptor, looks up the generated __EngineDispatch<Event>__ function
+        // in __Megamodule__ and calls the appropriate Set*DispatcherFn on EventBinding.
+        void RegisterNativeViewArray()
+        {
+            int r =
+                engine_->RegisterObjectType("NativeViewArray<class T>", 0, asOBJ_REF | asOBJ_NOCOUNT | asOBJ_TEMPLATE);
+            if (r < 0)
+                Log::Error("[ScriptEngine] Failed to register NativeViewArray<T> object type: {}", r);
+
+            // Register factory (we don't actually need one since C++ instantiates them, but asOBJ_TEMPLATE might
+            // complain without it) Wait, asOBJ_NOCOUNT doesn't strictly need a factory if scripts only receive it as
+            // parameters.
+
+            // length() method
+            r = engine_->RegisterObjectMethod("NativeViewArray<T>", "uint length() const",
+                                              asMETHOD(NativeViewArray<void*>, GetSize), asCALL_THISCALL);
+            if (r < 0)
+                Log::Error("[ScriptEngine] Failed to register NativeViewArray<T>::length: {}", r);
+
+            // opIndex - returns const reference
+            r = engine_->RegisterObjectMethod("NativeViewArray<T>", "const T& opIndex(uint) const",
+                                              asMETHOD(NativeViewArray<void*>, At), asCALL_THISCALL);
+            if (r < 0)
+                Log::Error("[ScriptEngine] Failed to register NativeViewArray<T>::opIndex: {}", r);
+        }
+
+        void WireDispatchers(const eastl::vector<ChannelDescriptor>& descriptors) const
+        {
+            asIScriptModule* mod = engine_->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
+            if (!mod)
+            {
+                Log::Error("[ScriptEngine] WireDispatchers: __Megamodule__ not found.");
+                return;
+            }
+
+            for (const auto& d : descriptors)
+            {
+                eastl::string funcName = "__EngineDispatch" + d.eventName + "__";
+                asIScriptFunction* fn = mod->GetFunctionByName(funcName.c_str());
+                if (!fn)
+                {
+                    Log::Warning("[ScriptEngine] WireDispatchers: function not found: {}", funcName.c_str());
+                    continue;
+                }
+
+                uint32_t eventId = HashString(d.eventName.c_str());
+                auto* channel = eventManager_->GetChannel(eventId);
+                if (channel)
+                {
+                    Log::Info("[ScriptEngine] Wired dispatcher: {} to channel {}", funcName.c_str(),
+                              d.eventName.c_str());
+                    channel->SetDispatcherFn(engine_.get(), executionManager_.get(), fn);
+                    channel->WarmupJIT();
+                }
+                else
+                {
+                    Log::Warning("[ScriptEngine] WireDispatchers: channel not found for event: {}",
+                                 d.eventName.c_str());
+                }
+            }
+        }
+
         void BroadcastEngineInitialized() const
         {
             for (auto* listener : listeners_)
@@ -411,8 +508,14 @@ namespace AngelEngine
 
     private:
         // --- ANGELSEA JIT POINTERS ---
-        eastl::unique_ptr<angelsea::Jit> jit_;
+        // Must be declared FIRST so it outlives the engine itself. The engine depends on the JIT compiler pointer
+        // and may call it during ShutDownAndRelease.
         eastl::unique_ptr<angelsea::JitConfig> jitConfig_;
+        eastl::unique_ptr<angelsea::Jit> jit_;
+
+        // --- ANGELSCRIPT ENGINE ---
+        // Must be declared BEFORE other components so it's destroyed AFTER them.
+        AsEnginePtr engine_;
 
         EngineConfig engine_config_;
 
@@ -428,9 +531,5 @@ namespace AngelEngine
 
         eastl::unique_ptr<IScriptBinding> eventBinding_;
         eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
-
-        // --- ANGELSCRIPT ENGINE ---
-        // Must be declared LAST so it's destroyed LAST after all bindings release their script_functions.
-        AsEnginePtr engine_;
     };
 } // namespace AngelEngine

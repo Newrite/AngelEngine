@@ -11,6 +11,7 @@ module;
 #include <fstream>
 #include <sstream>
 
+
 // Подключаем заголовочный файл aspromise для парсера co_await
 // (Убедись, что путь совпадает с тем, куда ты положил promise.hpp)
 #include "scriptpromise/aspromise.hpp"
@@ -21,7 +22,6 @@ module;
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
-
 
 
 export module AngelEngine.ModuleLoader;
@@ -60,11 +60,27 @@ namespace AngelEngine
             return empty;
         }
 
-        eastl::expected<void, ModuleLoaderError> CompileAllMods(asIScriptEngine* engine) override
+        void RecordCompilationError(const eastl::string& sectionName) override
         {
             std::scoped_lock lock(mutex_);
-            loaded_modules_.clear();
-            saveable_vars_cache_.clear();
+            // The section name is formatted as "ModName:FilePath"
+            auto colonPos = sectionName.find(':');
+            if (colonPos != eastl::string::npos)
+            {
+                eastl::string modName = sectionName.substr(0, colonPos);
+                if (eastl::find(faulty_modules_.begin(), faulty_modules_.end(), modName) == faulty_modules_.end())
+                {
+                    faulty_modules_.push_back(modName);
+                    Log::Error("[ScriptEngine] Recorded faulty module: {}", modName.c_str());
+                }
+            }
+        }
+
+        eastl::expected<void, ModuleLoaderError>
+        CompileAllMods(asIScriptEngine* engine, const eastl::vector<ChannelDescriptor>& eventDescriptors = {}) override
+        {
+            std::scoped_lock lock(mutex_);
+            auto localDescriptors = eventDescriptors; // Copy to avoid potential reference issues during retries
 
             eastl::vector<eastl::string> availableMods = provider_->GetAvailableMods();
             if (availableMods.empty())
@@ -73,27 +89,273 @@ namespace AngelEngine
                 return eastl::unexpected(ModuleLoaderError::PathNotFoundError);
             }
 
-            for (const auto& modName : availableMods)
+            // Retry loop for Megamodule compilation
+            bool compiled = false;
+            while (!compiled && !availableMods.empty())
             {
-                auto result = CompileSingleMod(engine, modName);
-                if (result.has_value())
+                loaded_modules_.clear();
+                saveable_vars_cache_.clear();
+
+                builder_ = eastl::make_unique<CScriptBuilder>();
+                int r = builder_->StartNewModule(engine, "__Megamodule__");
+                if (r < 0)
                 {
+                    Log::Error("[ScriptEngine] Failed to create __Megamodule__ with AS code: {}", r);
+                    return eastl::unexpected(ModuleLoaderError::CreateModuleError);
+                }
+
+                // Inject the AS dispatcher section FIRST so mods can call Subscribe* in their main()
+                if (!localDescriptors.empty())
+                {
+                    eastl::string dispatcherCode = GenerateDispatcherCode(localDescriptors);
+                    int dr = builder_->AddSectionFromMemory("__dispatcher__", dispatcherCode.c_str(),
+                                                            static_cast<unsigned int>(dispatcherCode.size()), 0);
+                    if (dr < 0)
+                        Log::Error("[ModuleLoader] Failed to add __dispatcher__ section: {}", dr);
+                }
+
+                for (const auto& modName : availableMods)
+                {
+                    auto loadModResult = LoadScriptsFromProvider(modName);
+                    if (!loadModResult)
+                    {
+                        Log::Error("[ScriptEngine] Failed to load scripts for: {}", modName.c_str());
+                        // If a mod fails to load, we could remove it and retry, but for now we just return error.
+                        return loadModResult;
+                    }
                     loaded_modules_.push_back(modName);
                 }
-                else
+
+                r = builder_->BuildModule();
+                if (r < 0)
                 {
-                    Log::Error("[ScriptEngine] Failed to compile mod: {}", modName.c_str());
-                    return eastl::unexpected(result.error());
+                    Log::Error("[ScriptEngine] __Megamodule__ Compilation FAILED with AS code: {}", r);
+                    engine->DiscardModule("__Megamodule__");
+
+                    if (!faulty_modules_.empty())
+                    {
+                        Log::Error("[ScriptEngine] Rebuilding Megamodule without faulty modules...");
+                        for (const auto& faultyMod : faulty_modules_)
+                        {
+                            availableMods.erase(eastl::remove(availableMods.begin(), availableMods.end(), faultyMod),
+                                                availableMods.end());
+                        }
+                        faulty_modules_.clear(); // Clear for the next attempt
+                        continue; // Retry while loop
+                    }
+                    else
+                    {
+                        Log::Error(
+                            "[ScriptEngine] Compilation failed but no faulty module was identified from callbacks.");
+                        return eastl::unexpected(ModuleLoaderError::BuildModuleError);
+                    }
                 }
+
+                compiled = true;
             }
 
+            if (!compiled)
+            {
+                Log::Error("[ScriptEngine] All compilation attempts failed.");
+                return eastl::unexpected(ModuleLoaderError::BuildModuleError);
+            }
+
+            // Parse metadata for saveable variables
+            saveable_vars_cache_.clear();
+            asIScriptModule* mod = builder_->GetModule();
+            if (mod)
+            {
+                int globalVarCount = mod->GetGlobalVarCount();
+                for (int i = 0; i < globalVarCount; ++i)
+                {
+                    std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
+
+                    bool isSaveable = false;
+                    for (const auto& meta : metadataList)
+                    {
+                        if (meta == "Save")
+                        {
+                            isSaveable = true;
+                            break;
+                        }
+                    }
+
+                    if (isSaveable)
+                    {
+                        const char* varName = nullptr;
+                        const char* nameSpace = nullptr;
+                        mod->GetGlobalVar(i, &varName, &nameSpace);
+                        if (varName)
+                        {
+                            // saveable_vars_cache_ is keyed by modName, which corresponds to the namespace.
+                            // If nameSpace is empty, it's a global var (maybe from a public_api mod).
+                            eastl::string modKey =
+                                nameSpace && nameSpace[0] != '\0' ? nameSpace : loaded_modules_.front();
+                            saveable_vars_cache_[modKey].push_back(varName);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Log::Error("[ScriptEngine] Failed to retrieve __Megamodule__ after build");
+                return eastl::unexpected(ModuleLoaderError::BuildModuleError);
+            }
+
+            Log::Info("[ScriptEngine] + Successfully loaded __Megamodule__ with {} mods", loaded_modules_.size());
             return {};
         }
 
     private:
-        eastl::expected<void, ModuleLoaderError> LoadScriptsFromProvider(const fs::path& rootPath) const
+        // -----------------------------------------------------------------
+        // Generate the AS-side dispatcher code from channel descriptors.
+        // The generated section provides:
+        //   - funcdef for each event type
+        //   - array<Callback@> + array<bool> (for SubscribeOnce)
+        //   - Subscribe / SubscribeOnce / Unsubscribe functions
+        //   - __EngineDispatch<Event>__() function called by C++ (1 crossing)
+        // -----------------------------------------------------------------
+        static eastl::string GenerateDispatcherCode(const eastl::vector<ChannelDescriptor>& descriptors)
         {
-            auto scripts = provider_->GetScriptFiles(rootPath);
+            eastl::string code;
+            code += "// AUTO-GENERATED DISPATCHER - DO NOT EDIT\n";
+
+            for (const auto& d : descriptors)
+            {
+                const eastl::string dispatchFn = "__EngineDispatch" + d.eventName + "__";
+
+                // 1. funcdef (only if provided, otherwise assume bound in C++)
+                if (!d.funcdefDecl.empty())
+                {
+                    code += d.funcdefDecl.c_str();
+                    code += ";\n";
+                }
+
+                // 2. subscriber array + once-flags
+                code += "array<" + d.callbackType + "@> __" + d.eventName + "Subs;\n";
+                code += "array<bool> __" + d.eventName + "Once;\n";
+
+                // 3. engine dispatcher function
+                if (d.isDeferred)
+                {
+                    if (d.argTypes.empty())
+                    {
+                        code += "void " + dispatchFn + "(uint eventCount)\n{\n";
+                        code += "    uint len;\n";
+                        code += "    for (uint e = 0; e < eventCount; e++) {\n";
+                    }
+                    else
+                    {
+                        code += "void " + dispatchFn + "(";
+                        for (size_t k = 0; k < d.argTypes.size(); ++k)
+                        {
+                            code += "NativeViewArray<" + d.argTypes[k] + ">& " + d.argNames[k];
+                            if (k + 1 < d.argTypes.size())
+                                code += ", ";
+                        }
+                        code += ")\n{\n";
+                        if (!d.argNames.empty())
+                            code += "    uint eventCount = " + d.argNames[0] + ".length();\n";
+                        code += "    uint len;\n";
+                        code += "    for (uint e = 0; e < eventCount; e++) {\n";
+                    }
+
+                    // Iterate backwards: if a script removes an element during its call,
+                    // it only shifts elements at or after the current index, leaving lower indices intact.
+                    code += "        len = __" + d.eventName + "Subs.length();\n";
+                    code += "        while (len > 0)\n        {\n";
+                    code += "            len--;\n";
+                    code += "            if (@__" + d.eventName + "Subs[len] != null) __" + d.eventName + "Subs[len](";
+
+                    for (size_t k = 0; k < d.argNames.size(); ++k)
+                    {
+                        code += d.argNames[k] + "[e]";
+                        if (k + 1 < d.argNames.size())
+                            code += ", ";
+                    }
+
+                    code += ");\n";
+                    code += "            if (__" + d.eventName + "Once.length() > len && __" + d.eventName +
+                        "Once[len]) {\n";
+                    code += "                __" + d.eventName + "Subs.removeAt(len);\n";
+                    code += "                __" + d.eventName + "Once.removeAt(len);\n";
+                    code += "            }\n";
+                    code += "        }\n";
+                    code += "    }\n}\n";
+                }
+                else
+                {
+                    code += "void " + dispatchFn + "(";
+                    code += d.argDecl;
+                    code += ")\n{\n";
+                    code += "    uint len = __" + d.eventName + "Subs.length();\n";
+                    code += "    while (len > 0)\n    {\n";
+                    code += "        len--;\n";
+                    code += "        if (@__" + d.eventName + "Subs[len] != null) __" + d.eventName + "Subs[len](";
+                    code += d.dispatchArgs;
+                    code += ");\n";
+                    code +=
+                        "        if (__" + d.eventName + "Once.length() > len && __" + d.eventName + "Once[len]) {\n";
+                    code += "            __" + d.eventName + "Subs.removeAt(len);\n";
+                    code += "            __" + d.eventName + "Once.removeAt(len);\n";
+                    code += "        }\n";
+                    code += "    }\n}\n";
+                }
+
+                // 4. Subscribe / SubscribeOnce / Unsubscribe
+                // If the channel is handled manually by C++ (no funcdef string), we omit creating AS helpers.
+                if (!d.funcdefDecl.empty())
+                {
+                    code += "void Subscribe" + d.eventName + "(" + d.callbackType + "@ cb)\n{\n";
+                    code += "    __" + d.eventName + "Subs.insertLast(@cb);\n";
+                    code += "    __" + d.eventName + "Once.insertLast(false);\n}\n";
+
+                    code += "void Subscribe" + d.eventName + "Once(" + d.callbackType + "@ cb)\n{\n";
+                    code += "    __" + d.eventName + "Subs.insertLast(@cb);\n";
+                    code += "    __" + d.eventName + "Once.insertLast(true);\n}\n";
+                }
+
+                // 5. Unsubscribe
+                code += "void Unsubscribe" + d.eventName + "(" + d.callbackType + "@ cb)\n{\n";
+                code += "    uint len = __" + d.eventName + "Subs.length();\n";
+                code += "    while (len > 0) {\n";
+                code += "        len--;\n";
+                code += "        if (@__" + d.eventName + "Subs[len] is @cb) {\n";
+                code += "            __" + d.eventName + "Subs.removeAt(len);\n";
+                code += "            __" + d.eventName + "Once.removeAt(len);\n";
+                code += "            return;\n        }\n    }\n}\n";
+
+                code += "\n"; // blank line between channels
+            }
+
+            return code;
+        }
+
+        // Returns the AS function declaration for a channel's dispatcher function,
+        // used by ScriptEngine to look it up via GetFunctionByDecl() after compile.
+        static eastl::string GetDispatcherFnDecl(const ChannelDescriptor& d)
+        {
+            if (d.isDeferred)
+            {
+                if (d.argTypes.empty())
+                    return "void __EngineDispatch" + d.eventName + "__(" + "uint" + ")";
+
+                eastl::string decl = "void __EngineDispatch" + d.eventName + "__(";
+                for (size_t k = 0; k < d.argTypes.size(); ++k)
+                {
+                    decl += "array<" + d.argTypes[k] + ">@";
+                    if (k + 1 < d.argTypes.size())
+                        decl += ", ";
+                }
+                decl += ")";
+                return decl;
+            }
+            return "void __EngineDispatch" + d.eventName + "__(" + d.argDecl + ")";
+        }
+        eastl::expected<void, ModuleLoaderError> LoadScriptsFromProvider(const eastl::string& modName) const
+        {
+            auto modPath = provider_->GetModPath(modName);
+            auto scripts = provider_->GetScriptFiles(modPath);
             if (scripts.empty())
                 return eastl::unexpected(ModuleLoaderError::LoadScriptError);
 
@@ -117,6 +379,14 @@ namespace AngelEngine
                     file.read(code.data(), fileSize);
                 }
 
+                // Wrap the code in `namespace ModName { ... }` unconditionally
+                eastl::string wrappedCode = "namespace ";
+                wrappedCode += modName;
+                wrappedCode += "\n{\n";
+                wrappedCode += code;
+                wrappedCode += "\n}\n";
+                code = wrappedCode;
+
                 // 2. Препроцессинг PROMISE (магия co_await)
                 size_t codeSize = code.size();
 
@@ -127,7 +397,8 @@ namespace AngelEngine
 
                 // 3. Загружаем обработанный код в CScriptBuilder.
                 // Мы передаем scriptPath как имя секции, чтобы ошибки компиляции AS указывали на реальный файл.
-                int r = builder_->AddSectionFromMemory(scriptPath.string().c_str(), processedCode,
+                eastl::string sectionName = modName + ":" + scriptPath.string().c_str();
+                int r = builder_->AddSectionFromMemory(sectionName.c_str(), processedCode,
                                                        static_cast<unsigned int>(codeSize), 0);
 
                 // 4. Обязательно освобождаем память, выделенную генератором
@@ -143,84 +414,9 @@ namespace AngelEngine
             return {};
         }
 
-        eastl::expected<void, ModuleLoaderError> CompileSingleMod(asIScriptEngine* engine, const eastl::string& modName)
-        {
-            int r = builder_->StartNewModule(engine, modName.c_str());
-            if (r < 0)
-            {
-                Log::Error("[ScriptEngine] Failed to create module: {} with AS code: {}", modName.c_str(), r);
-                return eastl::unexpected(ModuleLoaderError::CreateModuleError);
-            }
-
-            // Load Standard Lib
-            auto stdLibPath = provider_->GetStdLibPath();
-            auto loadStdResult = LoadScriptsFromProvider(stdLibPath);
-            if (!loadStdResult)
-            {
-                Log::Error("[ScriptEngine] Failed to inject STD into: {}", modName.c_str());
-                return loadStdResult;
-            }
-
-            // Load Mod Scripts
-            auto modPath = provider_->GetModPath(modName);
-            auto loadModResult = LoadScriptsFromProvider(modPath);
-            if (!loadModResult)
-            {
-                Log::Error("[ScriptEngine] Failed to load scripts for: {}", modName.c_str());
-                return loadModResult;
-            }
-
-            r = builder_->BuildModule();
-            if (r < 0)
-            {
-                Log::Error("[ScriptEngine] Compilation FAILED for mod: {} with AS code: {}", modName.c_str(), r);
-                engine->DiscardModule(modName.c_str());
-                return eastl::unexpected(ModuleLoaderError::BuildModuleError);
-            }
-
-            // Parse metadata for saveable variables
-            saveable_vars_cache_.erase(modName); // Clear cache for this module
-            asIScriptModule* mod = builder_->GetModule();
-            if (mod)
-            {
-                int globalVarCount = mod->GetGlobalVarCount();
-                for (int i = 0; i < globalVarCount; ++i)
-                {
-                    std::vector<std::string> metadataList = builder_->GetMetadataForVar(i);
-
-                    bool isSaveable = false;
-                    for (const auto& meta : metadataList)
-                    {
-                        if (meta == "Save")
-                        {
-                            isSaveable = true;
-                            break;
-                        }
-                    }
-
-                    if (isSaveable)
-                    {
-                        const char* varName = nullptr;
-                        mod->GetGlobalVar(i, &varName);
-                        if (varName)
-                        {
-                            saveable_vars_cache_[modName].push_back(varName);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                Log::Error("[ScriptEngine] Failed to retrieve module after build: {}", modName.c_str());
-                return eastl::unexpected(ModuleLoaderError::BuildModuleError);
-            }
-
-            Log::Info("[ScriptEngine] + Loaded mod: {}", modName.c_str());
-            return {};
-        }
-
-        mutable std::mutex mutex_;
+        mutable std::recursive_mutex mutex_;
         eastl::vector<eastl::string> loaded_modules_;
+        eastl::vector<eastl::string> faulty_modules_;
         mutable eastl::map<eastl::string, eastl::vector<eastl::string>> saveable_vars_cache_;
         eastl::unique_ptr<CScriptBuilder> builder_;
         eastl::unique_ptr<IScriptSourceProvider> provider_;

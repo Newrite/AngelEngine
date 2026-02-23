@@ -14,8 +14,8 @@ TEST_CASE(Exceptions, DivideByZero)
         }
     )");
 
-    asIScriptModule* exceptMod = fixture.engine->GetEngine()->GetModule("ExceptionTest");
-    asIScriptFunction* exceptMain = exceptMod->GetFunctionByDecl("void main()");
+    asIScriptModule* exceptMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* exceptMain = exceptMod->GetFunctionByDecl("void ExceptionTest::main()");
     ASSERT_TRUE(exceptMain != nullptr, "ExceptionTest main() not found");
 
     auto ctxPtr = fixture.engine->GetExecutionManager()->RequestContext(fixture.engine->GetEngine(), nullptr);

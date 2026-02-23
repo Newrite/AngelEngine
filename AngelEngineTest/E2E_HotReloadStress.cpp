@@ -62,8 +62,8 @@ TEST_CASE(E2E, HotReloadConcurrencyStress)
 
     EXPECT_TRUE(tickCount > 10, "Ticker thread was permanently blocked/deadlocked by HotReloads.");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("StressMod");
-    int varIdx = mod->GetGlobalVarIndexByName("value");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    int varIdx = mod->GetGlobalVarIndexByName("StressMod::value");
     int* valPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 
     // After 5 reloads, `main()` sets it to 500. Then it might have ticked a few times adding 10.

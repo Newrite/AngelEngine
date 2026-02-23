@@ -26,6 +26,7 @@ end
 add_requires("eastl")
 add_requires("mimalloc")
 add_requires("fmt")
+add_requires("nlohmann_json")
 
 if is_mode("release") or is_mode("releasedbg") then
     -- 1. Высший уровень абстракции xmake (включает -O3 / -Ofast)
@@ -186,6 +187,7 @@ target("AngelEngine")
     
     add_packages("mimalloc", { public = true })
     add_packages("eastl", { public = true })
+    add_packages("nlohmann_json", { public = true })
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")
     
@@ -198,7 +200,7 @@ target("AngelEngine")
     add_headerfiles("AngelEngine/**.h", { public = true })
     add_headerfiles("AngelEngine/**.hpp", { public = true,  })
     
-    add_includedirs("GitModules/asbind20/include")
+    add_includedirs("GitModules/asbind20/include", { public = true })
     
     -- Custom addons for angel script, replace std::string with eastl::string
     add_includedirs("AngelEngine/Addons")

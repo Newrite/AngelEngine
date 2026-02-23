@@ -1,9 +1,11 @@
 ﻿module;
 
-#include <angelscript.h>
-#include <print>
-#include <EASTL/unique_ptr.h>
+#include <EABASE/eabase.h>
 #include <EASTL/expected.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+#include <angelscript.h>
+
 
 export module AngelEngine.ReloadManager;
 
@@ -15,8 +17,7 @@ namespace AngelEngine
     export class ReloadManager final : public IReloadManager
     {
     public:
-        eastl::expected<void, ReloadError> ReloadScripts(asIScriptEngine* engine,
-                                                         IModuleLoader* moduleLoader,
+        eastl::expected<void, ReloadError> ReloadScripts(asIScriptEngine* engine, IModuleLoader* moduleLoader,
                                                          IExecutionManager* executionManager,
                                                          IEventManager* eventManager) override
         {
@@ -24,16 +25,24 @@ namespace AngelEngine
 
             executionManager->AbortAll();
             eventManager->ClearAll();
-            
+
             int r = engine->GarbageCollect();
-            if (r < 0) Log::Error("[ScriptEngine] GarbageCollect failed with code: {} while reload scripts", r);
+            if (r < 0)
+                Log::Error("[ScriptEngine] GarbageCollect failed with code: {} while reload scripts", r);
 
             executionManager->Renew();
-            
-            auto compileResult = moduleLoader->CompileAllMods(engine);
+
+            eastl::vector<ChannelDescriptor> descriptors;
+            if (eventManager)
+                descriptors = eventManager->GetAllDescriptors();
+
+            Log::Info("[ReloadManager] Gathered {} descriptors for reload compilation.", descriptors.size());
+
+            auto compileResult = moduleLoader->CompileAllMods(engine, descriptors);
             if (!compileResult.has_value())
             {
-                Log::Error("[ReloadManager] Compilation failed during reload: {}", static_cast<int>(compileResult.error()));
+                Log::Error("[ReloadManager] Compilation failed during reload: {}",
+                           static_cast<int>(compileResult.error()));
                 return eastl::unexpected(ReloadError::ScriptRebuildFailed);
             }
 
@@ -49,4 +58,4 @@ namespace AngelEngine
             return {};
         }
     };
-}
+} // namespace AngelEngine

@@ -25,15 +25,7 @@ namespace AngelEngineTest
     public:
         EngineFixture(bool useJIT = false)
         {
-            // Set up isolated directories
-            fs::create_directories("angelscripts/std");
-            fs::create_directories("angelscripts/mods");
-
-            // Dummy std
-            std::ofstream("angelscripts/std/std.as") << "// Standard Library Dummy";
-
-            AngelEngine::EngineConfig config{.scriptsPathStd = fs::absolute("angelscripts/std"),
-                                             .scriptsPathMod = fs::absolute("angelscripts/mods"),
+            AngelEngine::EngineConfig config{.scriptsPathMod = fs::absolute("angelscripts/mods"),
                                              .asPredefinedPath = fs::absolute("angelscripts/as.predefined"),
                                              .enableAutoReload = false,
                                              .enableWatchdog = true, // Watchdog testing explicitly tested elsewhere
@@ -75,12 +67,23 @@ namespace AngelEngineTest
         }
 
         // --- Helper Methods ---
-        void CreateScriptFile(const std::string& modName, const std::string& scriptCode)
+        void CreateScriptFile(const std::string& modName, const std::string& scriptCode, bool publicApi = false,
+                              const std::vector<std::string>& dependsOn = {})
         {
             std::string dirPath = "angelscripts/mods/" + modName;
             fs::create_directories(dirPath);
             std::ofstream file(dirPath + "/main.as", std::ios::trunc);
             file << scriptCode;
+
+            std::ofstream jsonFile(dirPath + "/mod.json", std::ios::trunc);
+            jsonFile << "{\"public_api\": " << (publicApi ? "true" : "false") << ", \"depends_on\": [";
+            for (size_t i = 0; i < dependsOn.size(); ++i)
+            {
+                jsonFile << "\"" << dependsOn[i] << "\"";
+                if (i < dependsOn.size() - 1)
+                    jsonFile << ", ";
+            }
+            jsonFile << "]}";
         }
 
         void WriteAndCompile(const std::string& modName, const std::string& scriptCode)

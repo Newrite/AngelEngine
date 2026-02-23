@@ -67,13 +67,13 @@ TEST_CASE(Performance, HeavyMathAndBranching)
         }
     )");
 
-    asIScriptModule* mathMod = fixture.engine->GetEngine()->GetModule("MathStressTest");
+    asIScriptModule* mathMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
 
     // N-Body Math Stress
     auto ctxPtr = fixture.engine->GetExecutionManager()->RequestContext(fixture.engine->GetEngine(), nullptr);
     asIScriptContext* ctx = ctxPtr.get();
 
-    asIScriptFunction* nbodyFunc = mathMod->GetFunctionByDecl("void SimulateGravity(int, int)");
+    asIScriptFunction* nbodyFunc = mathMod->GetFunctionByDecl("void MathStressTest::SimulateGravity(int, int)");
     ctx->Prepare(nbodyFunc);
     ctx->SetArgDWord(0, 10); // Iterations (lowered to prevent blocking CI execution for too long)
     ctx->SetArgDWord(1, 100); // Particles
@@ -87,7 +87,7 @@ TEST_CASE(Performance, HeavyMathAndBranching)
                  eastl::chrono::duration_cast<eastl::chrono::milliseconds>(mathEnd - mathStart).count());
 
     // Branching QuickSort Stress
-    asIScriptFunction* sortFunc = mathMod->GetFunctionByDecl("void RunSort(int)");
+    asIScriptFunction* sortFunc = mathMod->GetFunctionByDecl("void MathStressTest::RunSort(int)");
     ctx->Prepare(sortFunc);
     ctx->SetArgDWord(0, 10000); // 10,000 items
 

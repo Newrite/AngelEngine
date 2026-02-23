@@ -1,12 +1,14 @@
 ﻿module;
 
-#include <print>
-#include <mutex>
+#include <EABase/eabase.h>
 #include <angelscript.h>
+#include <mutex>
+#include <print>
 
+#include <EASTL/expected.h>
 #include <EASTL/vector.h>
 #include <EASTL/vector_map.h>
-#include <EASTL/expected.h>
+
 
 export module AngelEngine.EventManager;
 
@@ -63,7 +65,8 @@ namespace AngelEngine
 
         eastl::expected<void, EventError> ProcessAllDeferred(asIScriptContext* sharedCtx) override
         {
-            if (!sharedCtx) return eastl::unexpected(EventError::ContextPreparationFailed);
+            if (!sharedCtx)
+                return eastl::unexpected(EventError::ContextPreparationFailed);
 
             eastl::vector<IEventChannel*> activeChannels;
             {
@@ -80,10 +83,11 @@ namespace AngelEngine
 
             for (auto* channel : activeChannels)
             {
-                auto result = channel->ProcessDeferred(sharedCtx);
+                auto result = channel->ProcessDeferred();
                 if (!result.has_value())
                 {
-                    Log::Error("[EventManager] Failed to process deferred events for a channel: {}", static_cast<int>(result.error()));
+                    Log::Error("[EventManager] Failed to process deferred events for a channel: {}",
+                               static_cast<int>(result.error()));
                     // Continue processing other channels? Yes.
                 }
             }
@@ -100,13 +104,26 @@ namespace AngelEngine
                     pair.second->Clear();
                 }
             }
-            // Do NOT clear the channels map here. 
+            // Do NOT clear the channels map here.
             // Channels are structural components registered by bindings.
-            // We only want to clear their state (subscribers/events) during reload.
+            // We only want to clear their state during reload.
+        }
+
+        eastl::vector<ChannelDescriptor> GetAllDescriptors() const override
+        {
+            std::scoped_lock lock(mutex_);
+            eastl::vector<ChannelDescriptor> result;
+            result.reserve(channels_.size());
+            for (const auto& pair : channels_)
+            {
+                if (pair.second)
+                    result.push_back(pair.second->GetDescriptor());
+            }
+            return result;
         }
 
     private:
         mutable std::mutex mutex_;
         eastl::vector_map<uint32_t, IEventChannel*> channels_;
     };
-}
+} // namespace AngelEngine

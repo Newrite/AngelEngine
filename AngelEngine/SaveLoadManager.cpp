@@ -305,10 +305,10 @@ namespace AngelEngine
                 if (nameLen > 0)
                     stream.Write(modName.c_str(), nameLen);
 
-                asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
+                asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
                 if (!mod)
                 {
-                    Log::Error("[SaveLoadManager] Module not found during save: {}", modName.c_str());
+                    Log::Error("[SaveLoadManager] __Megamodule__ not found during save for: {}", modName.c_str());
                     return eastl::unexpected(SerializationError::SaveFailed);
                 }
 
@@ -324,7 +324,13 @@ namespace AngelEngine
                     if (varNameLen > 0)
                         stream.Write(varName.c_str(), varNameLen);
 
-                    int varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
+                    eastl::string namespacedVarName = modName + "::" + varName;
+                    int varIdx = mod->GetGlobalVarIndexByName(namespacedVarName.c_str());
+                    if (varIdx < 0)
+                    {
+                        // For public APIs without namespace
+                        varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
+                    }
                     if (varIdx >= 0)
                     {
                         int typeId = 0;
@@ -381,10 +387,10 @@ namespace AngelEngine
                         return eastl::unexpected(SerializationError::InvalidData);
                 }
 
-                asIScriptModule* mod = engine->GetModule(modName.c_str(), asGM_ONLY_IF_EXISTS);
+                asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
                 if (!mod)
                 {
-                    Log::Error("[SaveLoadManager] Module not found during load: {}", modName.c_str());
+                    Log::Error("[SaveLoadManager] __Megamodule__ not found during load for: {}", modName.c_str());
                     return eastl::unexpected(SerializationError::LoadFailed);
                 }
 
@@ -412,7 +418,12 @@ namespace AngelEngine
                     if (stream.Read(&storedTypeId, sizeof(storedTypeId)) < 0)
                         return eastl::unexpected(SerializationError::InvalidData);
 
-                    int varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
+                    eastl::string namespacedVarName = modName + "::" + varName;
+                    int varIdx = mod->GetGlobalVarIndexByName(namespacedVarName.c_str());
+                    if (varIdx < 0)
+                    {
+                        varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
+                    }
                     if (varIdx < 0)
                     {
                         Log::Error("[SaveLoadManager] Variable {} not found in module {}", varName.c_str(),

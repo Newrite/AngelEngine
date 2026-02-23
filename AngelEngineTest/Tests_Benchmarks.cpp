@@ -55,8 +55,8 @@ TEST_CASE(Benchmark, EventDispatchThroughput)
     auto runRes = fixture.engine->RunMod("BenchmarkMod");
     ASSERT_TRUE(runRes.has_value(), "BenchmarkMod failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("BenchmarkMod");
-    asIScriptFunction* subFn = mod->GetFunctionByDecl("void SubscribeAll()");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* subFn = mod->GetFunctionByDecl("void BenchmarkMod::SubscribeAll()");
     ASSERT_TRUE(subFn != nullptr, "SubscribeAll not found");
 
     constexpr int kSubscribers = 4;
@@ -105,8 +105,8 @@ TEST_CASE(Benchmark, TickCall_Before)
     auto runRes = fixture.engine->RunMod("TickMod");
     ASSERT_TRUE(runRes.has_value(), "TickMod failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("TickMod");
-    asIScriptFunction* tickFn = mod->GetFunctionByDecl("void OnTick()");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* tickFn = mod->GetFunctionByDecl("void TickMod::OnTick()");
     ASSERT_TRUE(tickFn != nullptr, "OnTick() not found");
 
     auto* em = fixture.engine->GetExecutionManager();
@@ -149,8 +149,8 @@ TEST_CASE(Benchmark, TickCall_After)
     auto runRes = fixture.engine->RunMod("TickModSticky");
     ASSERT_TRUE(runRes.has_value(), "TickModSticky failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("TickModSticky");
-    asIScriptFunction* tickFn = mod->GetFunctionByDecl("void OnTick()");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptFunction* tickFn = mod->GetFunctionByDecl("void TickModSticky::OnTick()");
     ASSERT_TRUE(tickFn != nullptr, "OnTick() not found in TickModSticky");
 
     auto* em = fixture.engine->GetExecutionManager();
@@ -220,7 +220,9 @@ TEST_CASE(Benchmark, DirectDispatch_OneSub)
 
     fixture.WriteAndCompile("DDOneTick", R"(
         int ticks = 0;
-        void main() { SubscribeTick(@OnTick); }
+        void main() {
+            ::SubscribeTick(@OnTick);
+        }
         void OnTick(float dt) { ticks++; }
     )");
     ASSERT_TRUE(fixture.engine->RunMod("DDOneTick").has_value(), "DDOneTick failed");
