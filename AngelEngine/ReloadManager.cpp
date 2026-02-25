@@ -1,4 +1,4 @@
-﻿﻿module;
+﻿module;
 
 #include <EABASE/eabase.h>
 #include <EASTL/expected.h>

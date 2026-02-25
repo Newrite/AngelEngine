@@ -48,9 +48,9 @@ namespace AngelEngine
         virtual ~IModuleLoader() = default;
         virtual eastl::expected<void, ModuleLoaderError>
         CompileAllMods(asIScriptEngine* engine, const eastl::vector<ChannelDescriptor>& eventDescriptors = {}) = 0;
-        virtual const eastl::vector<eastl::string> GetLoadedModules() const = 0;
+        virtual const eastl::vector<eastl::string>& GetLoadedModules() const = 0;
         virtual bool Empty() const = 0;
-        virtual const eastl::vector<eastl::string> GetSaveableVars(const eastl::string& modName) const = 0;
+        virtual const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const = 0;
         virtual void RecordCompilationError(const eastl::string& sectionName) = 0;
     };
 
