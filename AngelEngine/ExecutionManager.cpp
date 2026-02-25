@@ -136,11 +136,6 @@ namespace AngelEngine
             return {};
         }
 
-        void RegisterThreadSupport(asIScriptEngine* engine) override
-        {
-            // Здесь раньше регистрировался CContextMgr (sleep, yield). Нам это больше не нужно.
-        }
-
         ContextPtr RequestContext(asIScriptEngine* engine, void* param) override
         {
             // Lock-free pop: intrusive nodes — no heap allocation at all
