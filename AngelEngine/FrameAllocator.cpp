@@ -1,8 +1,5 @@
-﻿﻿module;
+﻿module;
 
-#include <cstddef>
-#include <cstdint>
-#include <new>
 #include <EASTL/vector.h>
 
 export module AngelEngine.FrameAllocator;
