@@ -22,6 +22,8 @@ export module AngelEngine.ExecutionManager;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
+
 
 namespace fs = std::filesystem;
 
@@ -53,12 +55,6 @@ namespace AngelEngine
             CleanPools();
         }
 
-        void AbortAll() const override
-        {
-            // Now fully handled per-context via Active tracking mechanisms if needed,
-            // or by watchdog explicitly. For a lock-free queue we don't track issued contexts
-            // as they are strictly owned by whoever holds the ContextPtr.
-        }
 
         void Renew() override
         {
@@ -135,23 +131,6 @@ namespace AngelEngine
                     Log::Error("[ExecutionManager] Failed to start mod context for {}: {}", modName.c_str(),
                                static_cast<int>(result.error()));
                 }
-            }
-
-            return {};
-        }
-
-        eastl::expected<void, ExecutionError> RunMod(asIScriptEngine* engine, const eastl::string& modName) override
-        {
-            if (modName.empty())
-            {
-                Log::Info("[ScriptEngine] No mod load to run.");
-                return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
-            }
-
-            auto resultStartModContext = this->StartContextHelper(engine, modName.c_str());
-            if (!resultStartModContext.has_value())
-            {
-                return resultStartModContext;
             }
 
             return {};

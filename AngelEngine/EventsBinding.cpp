@@ -21,7 +21,7 @@ namespace AngelEngine
         constexpr uint32_t OnLoad = HashString("Load");
     } // namespace EventsName
 
-    export class EventBinding final : public IScriptBinding, public IBuiltinEventDispatcher
+    export class EventBinding final : public IBuiltinEventDispatcher
     {
     public:
         explicit EventBinding(IEventManager* eventManager) : eventManager_(eventManager)
@@ -51,14 +51,6 @@ namespace AngelEngine
                 eventManager_->UnregisterChannel(EventsName::OnLoad);
                 eventManager_->UnregisterChannel(EventsName::OnSave);
             }
-        }
-
-        // Bind() intentionally does NOT register funcdef or SubscribeTick/SubscribeLoad/SubscribeSave
-        // here anymore. Those are generated into the AS __dispatcher__ section by ModuleLoader
-        // based on GetDescriptor() metadata — they become plain AS functions callable by mods.
-        void Bind(asIScriptEngine* /*engine*/) override
-        {
-            // Intentionally empty: sub/unsub API lives in the AS dispatcher section.
         }
 
 

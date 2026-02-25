@@ -15,7 +15,7 @@ module;
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
 
-#include "NativeViewArray.h"
+import AngelEngine.NativeViewArray;
 
 
 export module AngelEngine.ScriptEngine;
@@ -32,6 +32,9 @@ import AngelEngine.ScriptWatcher;
 import AngelEngine.Logger;
 import AngelEngine.FrameAllocator;
 import AngelEngine.Memory;
+import AngelEngine.Errors;
+import AngelEngine.Types;
+import AngelEngine.Events.Interfaces;
 
 namespace AngelEngine
 {
@@ -117,8 +120,7 @@ namespace AngelEngine
             // eventBinding_ implements IBuiltinEventDispatcher — ExecutionManager::Tick
             // calls DispatchBuiltinEvents(ctx, dt) directly with its pooled context.
             // No more Enqueue + queue swap for OnTick.
-            IBuiltinEventDispatcher* dispatcher =
-                eventBinding_ ? static_cast<EventBinding*>(eventBinding_.get()) : nullptr;
+            IBuiltinEventDispatcher* dispatcher = eventBinding_.get();
 
             auto tickResult = executionManager_->Tick(deltaTime, eventManager_.get(), engine_.get(), dispatcher);
 
@@ -141,21 +143,6 @@ namespace AngelEngine
             if (!resultRunMods.has_value())
             {
                 Log::Error("[ScriptEngine] Failed to run all mods: {}", static_cast<int>(resultRunMods.error()));
-                return eastl::unexpected(EngineError::FailRunMods);
-            }
-
-            return {};
-        }
-
-        eastl::expected<void, EngineError> RunMod(const eastl::string& modName) override
-        {
-            std::shared_lock lock(mutex_);
-
-            auto resultRunMod = executionManager_->RunMod(engine_.get(), modName);
-            if (!resultRunMod.has_value())
-            {
-                Log::Error("[ScriptEngine] Failed to run mod {}: {}", modName.c_str(),
-                           static_cast<int>(resultRunMod.error()));
                 return eastl::unexpected(EngineError::FailRunMods);
             }
 
@@ -307,10 +294,15 @@ namespace AngelEngine
 
             BroadcastEngineInitialized();
 
+
             return {};
         }
 
-        void GeneratePredefined() { GenerateScriptPredefined(engine_.get(), engine_config_.asPredefinedPath); }
+        void GeneratePredefined()
+        {
+            auto descriptors = eventManager_->GetAllDescriptors();
+            GenerateScriptPredefined(engine_.get(), engine_config_.asPredefinedPath, descriptors);
+        }
 
     private:
         explicit ScriptEngine(AsEnginePtr as_engine, eastl::unique_ptr<IEngineComponentFactory> factory) :
@@ -372,16 +364,6 @@ namespace AngelEngine
 
         eastl::expected<void, BindingError> BindAll()
         {
-            if (eventBinding_)
-            {
-                auto result = bindingManager_->Bind(engine_.get(), eventBinding_.get());
-                if (!result.has_value())
-                {
-                    Log::Error("[ScriptEngine] Failed to bind EventBinding.");
-                    return result;
-                }
-            }
-
             auto result = bindingManager_->BindAll(engine_.get());
             if (!result.has_value())
             {
@@ -529,7 +511,7 @@ namespace AngelEngine
         eastl::unique_ptr<IBindingManager> bindingManager_;
         eastl::unique_ptr<IEventManager> eventManager_;
 
-        eastl::unique_ptr<IScriptBinding> eventBinding_;
+        eastl::unique_ptr<IBuiltinEventDispatcher> eventBinding_;
         eastl::unique_ptr<IScriptWatcher> scriptWatcher_;
     };
 } // namespace AngelEngine

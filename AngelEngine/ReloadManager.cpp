@@ -1,4 +1,4 @@
-﻿module;
+﻿﻿module;
 
 #include <EABASE/eabase.h>
 #include <EASTL/expected.h>
@@ -23,7 +23,6 @@ namespace AngelEngine
         {
             Log::Info("[ScriptEngine] Starting Reload...");
 
-            executionManager->AbortAll();
             eventManager->ClearAll();
 
             int r = engine->GarbageCollect();

@@ -1,17 +1,19 @@
 module;
 
+#include <EASTL\vector.h>
 #include <cassert>
+#include <cstdio> // Для надежного C-style FILE*
+#include <filesystem>
 #include <format>
 #include <string>
-#include <string_view>
-#include <filesystem>
-#include <cstdio> // Для надежного C-style FILE*
+
 
 #include "angelscript.h"
 
 export module AngelEngine.PredefinedGenerator;
 
 import AngelEngine.Logger;
+import AngelEngine.Interfaces;
 
 namespace AngelEngine
 {
@@ -20,18 +22,22 @@ namespace AngelEngine
         for (int i = 0; i < engine->GetEnumCount(); i++)
         {
             const auto e = engine->GetEnumByIndex(i);
-            if (not e) continue;
+            if (not e)
+                continue;
             const std::string_view ns = e->GetNamespace();
-            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
+            if (not ns.empty())
+                out += std::format("namespace {} {{\n", ns);
             out += std::format("enum {} {{\n", e->GetName());
             for (int j = 0; j < e->GetEnumValueCount(); ++j)
             {
                 out += std::format("\t{}", e->GetEnumValueByIndex(j, nullptr));
-                if (j < e->GetEnumValueCount() - 1) out += ",";
+                if (j < e->GetEnumValueCount() - 1)
+                    out += ",";
                 out += "\n";
             }
             out += "}\n";
-            if (not ns.empty()) out += "}\n";
+            if (not ns.empty())
+                out += "}\n";
         }
     }
 
@@ -40,10 +46,12 @@ namespace AngelEngine
         for (int i = 0; i < engine->GetObjectTypeCount(); i++)
         {
             const auto t = engine->GetObjectTypeByIndex(i);
-            if (not t) continue;
+            if (not t)
+                continue;
 
             const std::string_view ns = t->GetNamespace();
-            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
+            if (not ns.empty())
+                out += std::format("namespace {} {{\n", ns);
 
             out += std::format("class {}", t->GetName());
             if (t->GetSubTypeCount() > 0)
@@ -51,7 +59,8 @@ namespace AngelEngine
                 out += "<";
                 for (int sub = 0; sub < t->GetSubTypeCount(); ++sub)
                 {
-                    if (sub < t->GetSubTypeCount() - 1) out += ", ";
+                    if (sub < t->GetSubTypeCount() - 1)
+                        out += ", ";
                     const auto st = t->GetSubType(sub);
                     out += st->GetName();
                 }
@@ -80,11 +89,12 @@ namespace AngelEngine
             }
             for (int j = 0; j < t->GetChildFuncdefCount(); ++j)
             {
-                out += std::format("\tfuncdef {};\n",
-                                      t->GetChildFuncdef(j)->GetFuncdefSignature()->GetDeclaration(false));
+                out +=
+                    std::format("\tfuncdef {};\n", t->GetChildFuncdef(j)->GetFuncdefSignature()->GetDeclaration(false));
             }
             out += "}\n";
-            if (not ns.empty()) out += "}\n";
+            if (not ns.empty())
+                out += "}\n";
         }
     }
 
@@ -93,11 +103,14 @@ namespace AngelEngine
         for (int i = 0; i < engine->GetGlobalFunctionCount(); i++)
         {
             const auto f = engine->GetGlobalFunctionByIndex(i);
-            if (not f) continue;
+            if (not f)
+                continue;
             const std::string_view ns = f->GetNamespace();
-            if (not ns.empty()) out += std::format("namespace {} {{ ", ns);
+            if (not ns.empty())
+                out += std::format("namespace {} {{ ", ns);
             out += std::format("{};", f->GetDeclaration(false, false, true));
-            if (not ns.empty()) out += " }";
+            if (not ns.empty())
+                out += " }";
             out += "\n";
         }
     }
@@ -112,13 +125,16 @@ namespace AngelEngine
             engine->GetGlobalPropertyByIndex(i, &name, &ns0, &type, nullptr, nullptr, nullptr, nullptr);
 
             const std::string t = engine->GetTypeDeclaration(type, true);
-            if (t.empty()) continue;
+            if (t.empty())
+                continue;
 
             std::string_view ns = ns0;
-            if (not ns.empty()) out += std::format("namespace {} {{ ", ns);
+            if (not ns.empty())
+                out += std::format("namespace {} {{ ", ns);
 
             out += std::format("{} {};", t, name);
-            if (not ns.empty()) out += " }";
+            if (not ns.empty())
+                out += " }";
             out += "\n";
         }
     }
@@ -128,17 +144,40 @@ namespace AngelEngine
         for (int i = 0; i < engine->GetTypedefCount(); ++i)
         {
             const auto type = engine->GetTypedefByIndex(i);
-            if (not type) continue;
+            if (not type)
+                continue;
             const std::string_view ns = type->GetNamespace();
-            if (not ns.empty()) out += std::format("namespace {} {{\n", ns);
-            out += std::format(
-                "typedef {} {};\n", engine->GetTypeDeclaration(type->GetSubTypeId(0)), type->GetName());
-            if (not ns.empty()) out += "}\n";
+            if (not ns.empty())
+                out += std::format("namespace {} {{\n", ns);
+            out += std::format("typedef {} {};\n", engine->GetTypeDeclaration(type->GetSubTypeId(0)), type->GetName());
+            if (not ns.empty())
+                out += "}\n";
         }
     }
-    
-    /// @brief Generate 'as.predefined' file, which contains all defined symbols in C++. It is used by the language server.
-    export void GenerateScriptPredefined(const asIScriptEngine* engine, const std::filesystem::path& path)
+
+    void printEventDispatcherAPI(const eastl::vector<ChannelDescriptor>& descriptors, std::string& out)
+    {
+        if (descriptors.empty())
+            return;
+        out += "\n// ---- Event Dispatcher API ----\n";
+        for (const auto& d : descriptors)
+        {
+            // funcdef (callback signature)
+            if (!d.funcdefDecl.empty())
+            {
+                out += std::format("{};\n", d.funcdefDecl.c_str());
+                out += std::format("void Subscribe{}({}@ cb);\n", d.eventName.c_str(), d.callbackType.c_str());
+                out += std::format("void Subscribe{}Once({}@ cb);\n", d.eventName.c_str(), d.callbackType.c_str());
+            }
+            out += std::format("void Unsubscribe{}({}@ cb);\n", d.eventName.c_str(), d.callbackType.c_str());
+            out += "\n";
+        }
+    }
+
+    /// @brief Generate 'as.predefined' file, which contains all defined symbols in C++. It is used by the language
+    /// server.
+    export void GenerateScriptPredefined(const asIScriptEngine* engine, const std::filesystem::path& path,
+                                         const eastl::vector<ChannelDescriptor>& eventDescriptors = {})
     {
         Log::Info("[PredefinedGenerator] Attempting to generate file at: {}", std::filesystem::absolute(path).string());
 
@@ -148,7 +187,8 @@ namespace AngelEngine
             std::filesystem::create_directories(path.parent_path(), ec);
             if (ec)
             {
-                Log::Error("[PredefinedGenerator] Failed to create directories! Path: {}. Error: {}", path.parent_path().string(), ec.message());
+                Log::Error("[PredefinedGenerator] Failed to create directories! Path: {}. Error: {}",
+                           path.parent_path().string(), ec.message());
                 // Не делаем return; возможно, директория уже существует, но заблокирована для проверки
             }
         }
@@ -158,12 +198,13 @@ namespace AngelEngine
         out.reserve(1024 * 512); // Сразу выделяем 512 KB, чтобы избежать реаллокаций памяти
 
         Log::Info("[PredefinedGenerator] Generating content...");
-        
+
         printEnumList(engine, out);
         printClassTypeList(engine, out);
         printGlobalFunctionList(engine, out);
         printGlobalPropertyList(engine, out);
         printGlobalTypedef(engine, out);
+        printEventDispatcherAPI(eventDescriptors, out);
 
         Log::Info("[PredefinedGenerator] Content generated. Total size: {} bytes", out.size());
 
@@ -178,7 +219,9 @@ namespace AngelEngine
 
         if (!file)
         {
-            Log::Error("[PredefinedGenerator] FAILED to open file for writing! Check file permissions or paths. Path: {}", path.string());
+            Log::Error(
+                "[PredefinedGenerator] FAILED to open file for writing! Check file permissions or paths. Path: {}",
+                path.string());
             return;
         }
 
@@ -188,11 +231,12 @@ namespace AngelEngine
 
         if (written != out.size())
         {
-            Log::Error("[PredefinedGenerator] FAILED to write full file! Wrote {} out of {} bytes.", written, out.size());
+            Log::Error("[PredefinedGenerator] FAILED to write full file! Wrote {} out of {} bytes.", written,
+                       out.size());
         }
         else
         {
             Log::Info("[PredefinedGenerator] SUCCESS! Predefined file written to disk.");
         }
     }
-}
+} // namespace AngelEngine

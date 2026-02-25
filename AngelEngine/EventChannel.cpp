@@ -12,10 +12,13 @@
 #include <scriptarray.h>
 
 
-#include "NativeViewArray.h"
+import AngelEngine.NativeViewArray;
+import AngelEngine.StickyContext;
+import AngelEngine.Events.Interfaces;
+import AngelEngine.Utils;
 
 // Set to 1 to enable microsecond-precision timing logs for AS dispatch calls.
-#define ANGEL_PROFILE_EVENTS 1
+#define ANGEL_PROFILE_EVENTS 0
 
 export module AngelEngine.EventChannel;
 

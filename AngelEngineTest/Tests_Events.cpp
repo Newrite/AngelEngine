@@ -4,7 +4,7 @@ using namespace AngelEngineTest;
 
 TEST_CASE(Events, Dispatching)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"EventTest"});
 
     fixture.WriteAndCompile("EventTest", R"(
         void main() {}
@@ -24,7 +24,7 @@ TEST_CASE(Events, Dispatching)
     )");
 
     // Initialize subscriptions
-    auto res = fixture.engine->RunMod("EventTest");
+    auto res = fixture.engine->RunAllMods();
     ASSERT_TRUE(res.has_value(), "EventTest failed to run");
 
     asIScriptModule* eventMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");

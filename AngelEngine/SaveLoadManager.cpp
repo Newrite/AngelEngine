@@ -2,7 +2,7 @@
 
 #include <EABase/eabase.h>
 #include <angelscript.h>
-#include <format>
+#include <cstring>
 
 #include <EASTL/expected.h>
 #include <EASTL/string.h>
@@ -17,29 +17,48 @@ import AngelEngine.Logger;
 
 namespace AngelEngine
 {
-    class ByteStream : public asIBinaryStream
+    // --- Format Constants ---
+    constexpr uint32_t SAVE_MAGIC = 0x414E4745; // "ANGE"
+    constexpr uint32_t SAVE_VERSION = 3; // V3: Universal length prefixing for all variables
+
+    // Safety Limits
+    constexpr uint32_t MAX_VAR_NAME_LEN = 1024;
+    constexpr uint32_t MAX_SAFE_STRING_LEN = 1024 * 1024; // 1 MB limit for actual string values
+    constexpr int MAX_RECURSION_DEPTH = 64;
+
+    class ByteStreamWriter : public asIBinaryStream
     {
     public:
-        ByteStream(eastl::vector<uint8_t>& buffer) : buffer_(buffer), readPos_(0) {}
-        ByteStream(const eastl::vector<uint8_t>& buffer) :
-            buffer_(const_cast<eastl::vector<uint8_t>&>(buffer)), readPos_(0)
-        {
-        }
+        ByteStreamWriter(eastl::vector<uint8_t>& buffer) : buffer_(buffer) {}
 
         int Write(const void* ptr, asUINT size) override
         {
             if (size == 0)
                 return 0;
-            size_t currentSize = buffer_.size();
-            size_t newSize = currentSize + size;
+            const size_t currentSize = buffer_.size();
+            const size_t newSize = currentSize + size;
             if (newSize > buffer_.capacity())
             {
-                buffer_.reserve(eastl::max<size_t>(newSize, eastl::max<size_t>(buffer_.capacity() * 2, 1024)));
+                const size_t doubled = buffer_.capacity() * 2;
+                buffer_.reserve(newSize > doubled ? newSize : (doubled > 1024 ? doubled : static_cast<size_t>(1024)));
             }
             buffer_.resize(newSize);
             std::memcpy(buffer_.data() + currentSize, ptr, size);
             return 0;
         }
+
+        int Read(void* ptr, asUINT size) override { return -1; }
+
+    private:
+        eastl::vector<uint8_t>& buffer_;
+    };
+
+    class ByteStreamReader : public asIBinaryStream
+    {
+    public:
+        ByteStreamReader(const eastl::vector<uint8_t>& buffer) : buffer_(buffer), readPos_(0) {}
+
+        int Write(const void* ptr, asUINT size) override { return -1; }
 
         int Read(void* ptr, asUINT size) override
         {
@@ -56,23 +75,210 @@ namespace AngelEngine
         }
 
     private:
-        eastl::vector<uint8_t>& buffer_;
+        const eastl::vector<uint8_t>& buffer_;
         size_t readPos_;
     };
+
+    // --- Helpers for Type Name Serialization ---
+    const char* GetPrimitiveTypeName(int typeId)
+    {
+        switch (typeId)
+        {
+        case asTYPEID_VOID:
+            return "void";
+        case asTYPEID_BOOL:
+            return "bool";
+        case asTYPEID_INT8:
+            return "int8";
+        case asTYPEID_INT16:
+            return "int16";
+        case asTYPEID_INT32:
+            return "int";
+        case asTYPEID_INT64:
+            return "int64";
+        case asTYPEID_UINT8:
+            return "uint8";
+        case asTYPEID_UINT16:
+            return "uint16";
+        case asTYPEID_UINT32:
+            return "uint";
+        case asTYPEID_UINT64:
+            return "uint64";
+        case asTYPEID_FLOAT:
+            return "float";
+        case asTYPEID_DOUBLE:
+            return "double";
+        default:
+            return nullptr;
+        }
+    }
 
     class BinarySerializer
     {
     public:
         BinarySerializer(asIScriptEngine* engine, asIBinaryStream* stream,
                          const eastl::vector<ISerializationHandler*>& handlers) :
-            engine_(engine), stream_(stream), handlers_(handlers)
+            engine_(engine), stream_(stream), handlers_(handlers), depth_(0)
         {
             stringTypeId_ = engine_->GetTypeIdByDecl("string");
         }
 
         bool SaveValue(void* ptr, int typeId)
         {
-            // 0. Custom Handlers
+            if (depth_ >= MAX_RECURSION_DEPTH)
+            {
+                Log::Error("[BinarySerializer] Max recursion depth exceeded ({})", MAX_RECURSION_DEPTH);
+                return false;
+            }
+            depth_++;
+            bool result = SaveValueInternal(ptr, typeId, stream_);
+            depth_--;
+            return result;
+        }
+
+        bool LoadValue(void* ptr, int typeId)
+        {
+            if (depth_ >= MAX_RECURSION_DEPTH)
+            {
+                Log::Error("[BinarySerializer] Max recursion depth exceeded ({})", MAX_RECURSION_DEPTH);
+                return false;
+            }
+            depth_++;
+            bool result = LoadValueInternal(ptr, typeId, stream_);
+            depth_--;
+            return result;
+        }
+
+        bool WriteStableType(int typeId)
+        {
+            bool isHandle = (typeId & asTYPEID_OBJHANDLE) != 0;
+            stream_->Write(&isHandle, sizeof(isHandle));
+
+            if (auto* handler = GetHandler(typeId))
+            {
+                eastl::string typeName = eastl::string("@") + handler->GetTypeName();
+                uint32_t len = static_cast<uint32_t>(typeName.length());
+                stream_->Write(&len, sizeof(len));
+                if (len > 0)
+                    stream_->Write(typeName.c_str(), len);
+                return true;
+            }
+
+            asITypeInfo* type = engine_->GetTypeInfoById(typeId);
+            if (type)
+            {
+                eastl::string fullName;
+                const char* ns = type->GetNamespace();
+                if (ns && ns[0] != '\0')
+                {
+                    fullName = eastl::string(ns) + "::";
+                }
+                fullName += type->GetName();
+
+                uint32_t len = static_cast<uint32_t>(fullName.length());
+                stream_->Write(&len, sizeof(len));
+                if (len > 0)
+                    stream_->Write(fullName.c_str(), len);
+                return true;
+            }
+
+            const char* primName = GetPrimitiveTypeName(typeId);
+            if (primName)
+            {
+                uint32_t len = static_cast<uint32_t>(std::strlen(primName));
+                stream_->Write(&len, sizeof(len));
+                if (len > 0)
+                    stream_->Write(primName, len);
+                return true;
+            }
+
+            Log::Error("[BinarySerializer] Failed to resolve stable type name for typeId: {}", typeId);
+            return false;
+        }
+
+        eastl::expected<int, SerializationError> ReadStableType()
+        {
+            bool isHandle = false;
+            if (stream_->Read(&isHandle, sizeof(isHandle)) < 0)
+                return eastl::unexpected(SerializationError::InvalidData);
+
+            uint32_t len = 0;
+            if (stream_->Read(&len, sizeof(len)) < 0)
+                return eastl::unexpected(SerializationError::InvalidData);
+            if (len > MAX_SAFE_STRING_LEN)
+                return eastl::unexpected(SerializationError::CorruptData);
+
+            eastl::string typeName;
+            typeName.resize(len);
+            if (len > 0)
+            {
+                if (stream_->Read(typeName.data(), len) < 0)
+                    return eastl::unexpected(SerializationError::InvalidData);
+            }
+
+            auto ApplyFlags = [isHandle](int typeId) -> int
+            { return isHandle ? (typeId | asTYPEID_OBJHANDLE) : typeId; };
+
+            if (typeName.length() > 0 && typeName[0] == '@')
+            {
+                eastl::string handlerName = typeName.substr(1);
+                int typeId = engine_->GetTypeIdByDecl(handlerName.c_str());
+                if (typeId >= 0 && GetHandler(typeId) != nullptr)
+                {
+                    return ApplyFlags(typeId);
+                }
+
+                int handleTypeId = typeId | asTYPEID_OBJHANDLE;
+                if (typeId >= 0 && GetHandler(handleTypeId) != nullptr)
+                {
+                    return ApplyFlags(typeId);
+                }
+
+                if (typeId < 0)
+                {
+                    Log::Error("[BinarySerializer] Restored type {} not found in engine", handlerName.c_str());
+                    return eastl::unexpected(SerializationError::TypeMismatch);
+                }
+                return ApplyFlags(typeId);
+            }
+
+            int typeId = engine_->GetTypeIdByDecl(typeName.c_str());
+            if (typeId >= 0)
+                return typeId;
+
+            if (typeName == "void")
+                return asTYPEID_VOID;
+            if (typeName == "bool")
+                return asTYPEID_BOOL;
+            if (typeName == "int8")
+                return asTYPEID_INT8;
+            if (typeName == "int16")
+                return asTYPEID_INT16;
+            if (typeName == "int")
+                return asTYPEID_INT32;
+            if (typeName == "int64")
+                return asTYPEID_INT64;
+            if (typeName == "uint8")
+                return asTYPEID_UINT8;
+            if (typeName == "uint16")
+                return asTYPEID_UINT16;
+            if (typeName == "uint")
+                return asTYPEID_UINT32;
+            if (typeName == "uint64")
+                return asTYPEID_UINT64;
+            if (typeName == "float")
+                return asTYPEID_FLOAT;
+            if (typeName == "double")
+                return asTYPEID_DOUBLE;
+
+            Log::Error("[BinarySerializer] Failed to map restored type name: {}", typeName.c_str());
+            return eastl::unexpected(SerializationError::TypeMismatch);
+        }
+
+    public:
+        // Public access to Internal methods for top-level length wrapping
+        bool SaveValueInternal(void* ptr, int typeId, asIBinaryStream* targetStream)
+        {
             if (auto* handler = GetHandler(typeId))
             {
                 void* objectPtr = ptr;
@@ -80,52 +286,50 @@ namespace AngelEngine
                 {
                     objectPtr = *static_cast<void**>(ptr);
                 }
-                handler->Save(engine_, objectPtr, stream_);
+                handler->Save(engine_, objectPtr, targetStream);
                 return true;
             }
 
-            // 1. Handle eastl::string
             if (typeId == stringTypeId_)
             {
                 eastl::string* str = static_cast<eastl::string*>(ptr);
                 uint32_t len = static_cast<uint32_t>(str->length());
-                stream_->Write(&len, sizeof(len));
+                targetStream->Write(&len, sizeof(len));
                 if (len > 0)
                 {
-                    stream_->Write(str->data(), len);
+                    targetStream->Write(str->data(), len);
                 }
                 return true;
             }
 
-            // 2. Handle Object Handles
             if (typeId & asTYPEID_OBJHANDLE)
             {
                 void* obj = *static_cast<void**>(ptr);
                 bool isNull = (obj == nullptr);
-                stream_->Write(&isNull, sizeof(bool));
+                targetStream->Write(&isNull, sizeof(bool));
 
                 if (!isNull)
                 {
-                    // Dereference handle to get the object type
                     asITypeInfo* type = engine_->GetTypeInfoById(typeId);
                     if (type)
                     {
-                        // Recursively save the object
-                        // Note: This is simplified. Real serialization needs to handle circular references and
-                        // polymorphism properly. But for this task, we stick to the provided logic structure.
-                        return SaveValue(obj, type->GetTypeId());
+                        if (depth_ >= MAX_RECURSION_DEPTH)
+                            return false;
+                        depth_++;
+                        bool res = SaveValueInternal(obj, type->GetTypeId(), targetStream);
+                        depth_--;
+                        return res;
                     }
                     return false;
                 }
                 return true;
             }
 
-            // 3. Handle Script Objects (Classes/Structs)
             if (typeId & asTYPEID_SCRIPTOBJECT)
             {
                 asIScriptObject* obj = static_cast<asIScriptObject*>(ptr);
                 if (!obj)
-                    return false; // Should not happen if not handle
+                    return false;
 
                 asITypeInfo* type = obj->GetObjectType();
                 uint32_t propCount = type->GetPropertyCount();
@@ -136,58 +340,58 @@ namespace AngelEngine
                     type->GetProperty(i, nullptr, &propTypeId);
                     void* propPtr = obj->GetAddressOfProperty(i);
 
-                    if (!SaveValue(propPtr, propTypeId))
-                    {
+                    if (depth_ >= MAX_RECURSION_DEPTH)
                         return false;
-                    }
+                    depth_++;
+                    bool res = SaveValueInternal(propPtr, propTypeId, targetStream);
+                    depth_--;
+                    if (!res)
+                        return false;
                 }
                 return true;
             }
 
-            // 4. Handle Primitives
             int size = engine_->GetSizeOfPrimitiveType(typeId);
             if (size > 0)
             {
-                stream_->Write(ptr, size);
+                targetStream->Write(ptr, size);
                 return true;
             }
 
-            // Unknown type
             Log::Error("[BinarySerializer] Unknown type ID: {}", typeId);
             return false;
         }
 
-        bool LoadValue(void* ptr, int typeId)
+        bool LoadValueInternal(void* ptr, int typeId, asIBinaryStream* sourceStream)
         {
-            // 0. Custom Handlers
             if (auto* handler = GetHandler(typeId))
             {
-                handler->Restore(engine_, ptr, stream_);
+                handler->Restore(engine_, ptr, sourceStream);
                 return true;
             }
 
-            // 1. Handle eastl::string
             if (typeId == stringTypeId_)
             {
                 uint32_t len = 0;
-                if (stream_->Read(&len, sizeof(len)) < 0)
+                if (sourceStream->Read(&len, sizeof(len)) < 0)
+                    return false;
+                if (len > MAX_SAFE_STRING_LEN)
                     return false;
 
                 eastl::string* str = static_cast<eastl::string*>(ptr);
                 str->resize(len);
                 if (len > 0)
                 {
-                    if (stream_->Read(str->data(), len) < 0)
+                    if (sourceStream->Read(str->data(), len) < 0)
                         return false;
                 }
                 return true;
             }
 
-            // 2. Handle Object Handles
             if (typeId & asTYPEID_OBJHANDLE)
             {
                 bool isNull = true;
-                if (stream_->Read(&isNull, sizeof(bool)) < 0)
+                if (sourceStream->Read(&isNull, sizeof(bool)) < 0)
                     return false;
 
                 void** handlePtr = static_cast<void**>(ptr);
@@ -206,19 +410,21 @@ namespace AngelEngine
                     if (!type)
                         return false;
 
-                    // If handle is null, create new object
                     if (*handlePtr == nullptr)
                     {
                         *handlePtr = engine_->CreateScriptObject(type);
                     }
 
-                    // Recursively load into the object
-                    return LoadValue(*handlePtr, type->GetTypeId());
+                    if (depth_ >= MAX_RECURSION_DEPTH)
+                        return false;
+                    depth_++;
+                    bool res = LoadValueInternal(*handlePtr, type->GetTypeId(), sourceStream);
+                    depth_--;
+                    return res;
                 }
                 return true;
             }
 
-            // 3. Handle Script Objects
             if (typeId & asTYPEID_SCRIPTOBJECT)
             {
                 asIScriptObject* obj = static_cast<asIScriptObject*>(ptr);
@@ -234,24 +440,26 @@ namespace AngelEngine
                     type->GetProperty(i, nullptr, &propTypeId);
                     void* propPtr = obj->GetAddressOfProperty(i);
 
-                    if (!LoadValue(propPtr, propTypeId))
-                    {
+                    if (depth_ >= MAX_RECURSION_DEPTH)
                         return false;
-                    }
+                    depth_++;
+                    bool res = LoadValueInternal(propPtr, propTypeId, sourceStream);
+                    depth_--;
+                    if (!res)
+                        return false;
                 }
                 return true;
             }
 
-            // 4. Handle Primitives
             int size = engine_->GetSizeOfPrimitiveType(typeId);
             if (size > 0)
             {
-                if (stream_->Read(ptr, size) < 0)
+                if (sourceStream->Read(ptr, size) < 0)
                     return false;
                 return true;
             }
 
-            Log::Error("[BinarySerializer] Unknown type ID: {}", typeId);
+            Log::Error("[BinarySerializer] Unknown type ID during load: {}", typeId);
             return false;
         }
 
@@ -279,6 +487,7 @@ namespace AngelEngine
         const eastl::vector<ISerializationHandler*>& handlers_;
         int stringTypeId_;
         eastl::vector_map<int, ISerializationHandler*> handlerCache_;
+        int depth_;
     };
 
     export class SaveLoadManager final : public ISaveLoadManager
@@ -290,8 +499,12 @@ namespace AngelEngine
                                                                                 IModuleLoader* loader) override
         {
             eastl::vector<uint8_t> outData;
-            ByteStream stream(outData);
+            ByteStreamWriter stream(outData);
             BinarySerializer serializer(engine, &stream, handlers_);
+
+            // Write Header
+            stream.Write(&SAVE_MAGIC, sizeof(SAVE_MAGIC));
+            stream.Write(&SAVE_VERSION, sizeof(SAVE_VERSION));
 
             const auto& modules = loader->GetLoadedModules();
             uint32_t modCount = static_cast<uint32_t>(modules.size());
@@ -299,13 +512,12 @@ namespace AngelEngine
 
             for (const auto& modName : modules)
             {
-                // Write Module Name
                 uint32_t nameLen = static_cast<uint32_t>(modName.length());
                 stream.Write(&nameLen, sizeof(nameLen));
                 if (nameLen > 0)
                     stream.Write(modName.c_str(), nameLen);
 
-                asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
+                asIScriptModule* mod = engine->GetModule(MegaModuleName, asGM_ONLY_IF_EXISTS);
                 if (!mod)
                 {
                     Log::Error("[SaveLoadManager] __Megamodule__ not found during save for: {}", modName.c_str());
@@ -318,7 +530,6 @@ namespace AngelEngine
 
                 for (const auto& varName : saveableVars)
                 {
-                    // Write Var Name
                     uint32_t varNameLen = static_cast<uint32_t>(varName.length());
                     stream.Write(&varNameLen, sizeof(varNameLen));
                     if (varNameLen > 0)
@@ -328,7 +539,6 @@ namespace AngelEngine
                     int varIdx = mod->GetGlobalVarIndexByName(namespacedVarName.c_str());
                     if (varIdx < 0)
                     {
-                        // For public APIs without namespace
                         varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
                     }
                     if (varIdx >= 0)
@@ -337,20 +547,29 @@ namespace AngelEngine
                         mod->GetGlobalVar(varIdx, nullptr, nullptr, &typeId);
                         void* ref = mod->GetAddressOfGlobalVar(varIdx);
 
-                        // Write TypeID
-                        stream.Write(&typeId, sizeof(typeId));
+                        if (!serializer.WriteStableType(typeId))
+                        {
+                            Log::Error("[SaveLoadManager] Failed to write type for variable: {}", varName.c_str());
+                            return eastl::unexpected(SerializationError::SaveFailed);
+                        }
 
-                        // Save Value
-                        if (!serializer.SaveValue(ref, typeId))
+                        // V3: Wrap value in a length-prefix
+                        eastl::vector<uint8_t> valBuffer;
+                        ByteStreamWriter valStream(valBuffer);
+                        if (!serializer.SaveValueInternal(ref, typeId, &valStream))
                         {
                             Log::Error("[SaveLoadManager] Failed to save variable: {} (TypeID: {})", varName.c_str(),
                                        typeId);
                             return eastl::unexpected(SerializationError::SaveFailed);
                         }
+
+                        uint32_t valSize = static_cast<uint32_t>(valBuffer.size());
+                        stream.Write(&valSize, sizeof(valSize));
+                        if (valSize > 0)
+                            stream.Write(valBuffer.data(), valSize);
                     }
                     else
                     {
-                        // Variable not found?
                         Log::Error("[SaveLoadManager] Variable {} not found in module {}", varName.c_str(),
                                    modName.c_str());
                         return eastl::unexpected(SerializationError::SaveFailed);
@@ -365,8 +584,27 @@ namespace AngelEngine
         {
             if (data.empty())
                 return eastl::unexpected(SerializationError::InvalidData);
-            ByteStream stream(data);
+            ByteStreamReader stream(data);
             BinarySerializer serializer(engine, &stream, handlers_);
+
+            // Read & Verify Header
+            uint32_t magic = 0;
+            if (stream.Read(&magic, sizeof(magic)) < 0)
+                return eastl::unexpected(SerializationError::InvalidData);
+            if (magic != SAVE_MAGIC)
+            {
+                Log::Error("[SaveLoadManager] Bad magic number in save data. Expected {}, got {}", SAVE_MAGIC, magic);
+                return eastl::unexpected(SerializationError::VersionMismatch);
+            }
+
+            uint32_t version = 0;
+            if (stream.Read(&version, sizeof(version)) < 0)
+                return eastl::unexpected(SerializationError::InvalidData);
+            if (version != SAVE_VERSION)
+            {
+                Log::Error("[SaveLoadManager] Unsupported save version. Expected {}, got {}", SAVE_VERSION, version);
+                return eastl::unexpected(SerializationError::VersionMismatch);
+            }
 
             uint32_t modCount = 0;
             if (stream.Read(&modCount, sizeof(modCount)) < 0)
@@ -374,10 +612,11 @@ namespace AngelEngine
 
             for (uint32_t i = 0; i < modCount; ++i)
             {
-                // Read Module Name
                 uint32_t nameLen = 0;
                 if (stream.Read(&nameLen, sizeof(nameLen)) < 0)
                     return eastl::unexpected(SerializationError::InvalidData);
+                if (nameLen > MAX_VAR_NAME_LEN)
+                    return eastl::unexpected(SerializationError::CorruptData);
 
                 eastl::string modName;
                 modName.resize(nameLen);
@@ -387,7 +626,7 @@ namespace AngelEngine
                         return eastl::unexpected(SerializationError::InvalidData);
                 }
 
-                asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
+                asIScriptModule* mod = engine->GetModule(MegaModuleName, asGM_ONLY_IF_EXISTS);
                 if (!mod)
                 {
                     Log::Error("[SaveLoadManager] __Megamodule__ not found during load for: {}", modName.c_str());
@@ -400,10 +639,11 @@ namespace AngelEngine
 
                 for (uint32_t j = 0; j < varCount; ++j)
                 {
-                    // Read Var Name
                     uint32_t varNameLen = 0;
                     if (stream.Read(&varNameLen, sizeof(varNameLen)) < 0)
                         return eastl::unexpected(SerializationError::InvalidData);
+                    if (varNameLen > MAX_VAR_NAME_LEN)
+                        return eastl::unexpected(SerializationError::CorruptData);
 
                     eastl::string varName;
                     varName.resize(varNameLen);
@@ -413,10 +653,13 @@ namespace AngelEngine
                             return eastl::unexpected(SerializationError::InvalidData);
                     }
 
-                    // Read TypeID
-                    int storedTypeId = 0;
-                    if (stream.Read(&storedTypeId, sizeof(storedTypeId)) < 0)
-                        return eastl::unexpected(SerializationError::InvalidData);
+                    auto typeRes = serializer.ReadStableType();
+                    if (!typeRes)
+                    {
+                        Log::Error("[SaveLoadManager] Failed to read valid type for variable {}", varName.c_str());
+                        return eastl::unexpected(typeRes.error());
+                    }
+                    int storedTypeId = typeRes.value();
 
                     eastl::string namespacedVarName = modName + "::" + varName;
                     int varIdx = mod->GetGlobalVarIndexByName(namespacedVarName.c_str());
@@ -424,25 +667,48 @@ namespace AngelEngine
                     {
                         varIdx = mod->GetGlobalVarIndexByName(varName.c_str());
                     }
+
                     if (varIdx < 0)
                     {
-                        Log::Error("[SaveLoadManager] Variable {} not found in module {}", varName.c_str(),
-                                   modName.c_str());
-                        return eastl::unexpected(SerializationError::LoadFailed);
+                        Log::Warning("[SaveLoadManager] Variable {} (mod {}) not found in current scripts. Skipping.",
+                                     varName.c_str(), modName.c_str());
+                        uint32_t valSize = 0;
+                        if (stream.Read(&valSize, sizeof(valSize)) < 0)
+                            return eastl::unexpected(SerializationError::InvalidData);
+
+                        if (valSize > 0)
+                        {
+                            uint8_t dummy[1024];
+                            uint32_t toSkip = valSize;
+                            while (toSkip > 0)
+                            {
+                                uint32_t chunk = toSkip > 1024 ? 1024 : toSkip;
+                                if (stream.Read(dummy, chunk) < 0)
+                                    return eastl::unexpected(SerializationError::InvalidData);
+                                toSkip -= chunk;
+                            }
+                        }
+                        continue;
                     }
 
                     int currentTypeId = 0;
                     mod->GetGlobalVar(varIdx, nullptr, nullptr, &currentTypeId);
 
+                    // V3: We have the size, so even on TypeMismatch we could potentially skip,
+                    // but for now we follow the policy: found + mismatch = error.
+                    uint32_t valSize = 0;
+                    if (stream.Read(&valSize, sizeof(valSize)) < 0)
+                        return eastl::unexpected(SerializationError::InvalidData);
+
                     if (currentTypeId != storedTypeId)
                     {
                         Log::Error("[SaveLoadManager] Type mismatch for variable {}: stored {}, current {}",
                                    varName.c_str(), storedTypeId, currentTypeId);
-                        return eastl::unexpected(SerializationError::LoadFailed);
+                        return eastl::unexpected(SerializationError::TypeMismatch);
                     }
 
                     void* ref = mod->GetAddressOfGlobalVar(varIdx);
-                    if (!serializer.LoadValue(ref, currentTypeId))
+                    if (!serializer.LoadValueInternal(ref, currentTypeId, &stream))
                     {
                         Log::Error("[SaveLoadManager] Failed to load value for variable {}", varName.c_str());
                         return eastl::unexpected(SerializationError::LoadFailed);

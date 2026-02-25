@@ -1,6 +1,8 @@
 #include <EASTL/chrono.h>
 #include "EngineFixture.hpp"
 
+import AngelEngine.StickyContext;
+
 using namespace AngelEngineTest;
 
 // ---------------------------------------------------------------------------
@@ -36,7 +38,7 @@ TEST_CASE(Benchmark, ContextPoolThroughput)
 // ---------------------------------------------------------------------------
 TEST_CASE(Benchmark, EventDispatchThroughput)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"BenchmarkMod"});
 
     fixture.WriteAndCompile("BenchmarkMod", R"(
         int callCount = 0;
@@ -52,7 +54,7 @@ TEST_CASE(Benchmark, EventDispatchThroughput)
         }
     )");
 
-    auto runRes = fixture.engine->RunMod("BenchmarkMod");
+    auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "BenchmarkMod failed to run");
 
     asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
@@ -94,7 +96,7 @@ TEST_CASE(Benchmark, EventDispatchThroughput)
 // ---------------------------------------------------------------------------
 TEST_CASE(Benchmark, TickCall_Before)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"TickMod"});
 
     fixture.WriteAndCompile("TickMod", R"(
         int ticks = 0;
@@ -102,7 +104,7 @@ TEST_CASE(Benchmark, TickCall_Before)
         void OnTick() { ticks++; }
     )");
 
-    auto runRes = fixture.engine->RunMod("TickMod");
+    auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "TickMod failed to run");
 
     asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
@@ -138,7 +140,7 @@ TEST_CASE(Benchmark, TickCall_Before)
 // ---------------------------------------------------------------------------
 TEST_CASE(Benchmark, TickCall_After)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"TickModSticky"});
 
     fixture.WriteAndCompile("TickModSticky", R"(
         int ticks = 0;
@@ -146,7 +148,7 @@ TEST_CASE(Benchmark, TickCall_After)
         void OnTick() { ticks++; }
     )");
 
-    auto runRes = fixture.engine->RunMod("TickModSticky");
+    auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "TickModSticky failed to run");
 
     asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
@@ -185,12 +187,12 @@ TEST_CASE(Benchmark, TickCall_After)
 // ---------------------------------------------------------------------------
 TEST_CASE(Benchmark, DirectDispatch_NoSub)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"DDEmptyMod"});
 
     fixture.WriteAndCompile("DDEmptyMod", R"(
         void main() {}
     )");
-    ASSERT_TRUE(fixture.engine->RunMod("DDEmptyMod").has_value(), "DDEmptyMod failed");
+    ASSERT_TRUE(fixture.engine->RunAllMods().has_value(), "DDEmptyMod failed");
 
     constexpr int kTicks = 10'000;
     auto start = eastl::chrono::steady_clock::now();
@@ -216,7 +218,7 @@ TEST_CASE(Benchmark, DirectDispatch_NoSub)
 // ---------------------------------------------------------------------------
 TEST_CASE(Benchmark, DirectDispatch_OneSub)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"DDOneTick"});
 
     fixture.WriteAndCompile("DDOneTick", R"(
         int ticks = 0;
@@ -225,7 +227,7 @@ TEST_CASE(Benchmark, DirectDispatch_OneSub)
         }
         void OnTick(float dt) { ticks++; }
     )");
-    ASSERT_TRUE(fixture.engine->RunMod("DDOneTick").has_value(), "DDOneTick failed");
+    ASSERT_TRUE(fixture.engine->RunAllMods().has_value(), "DDOneTick failed");
 
     constexpr int kTicks = 10'000;
     auto start = eastl::chrono::steady_clock::now();

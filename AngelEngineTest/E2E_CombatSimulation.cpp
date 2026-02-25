@@ -6,7 +6,7 @@ using namespace AngelEngineTest;
 
 TEST_CASE(E2E, CombatSimulationWithGarbageCollection)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"CombatSim"});
 
     fixture.WriteAndCompile("CombatSim", R"(
         class Entity {
@@ -50,8 +50,8 @@ TEST_CASE(E2E, CombatSimulationWithGarbageCollection)
         void main() {} // Required entry point for RunMod
     )");
 
-    auto ms = fixture.engine->RunMod("CombatSim");
-    ASSERT_TRUE(ms.has_value(), "Failed to run CombatSim");
+    auto ms = fixture.engine->RunAllMods();
+    ASSERT_TRUE(ms.has_value(), "Failed to run all mods");
 
     asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
     asIScriptFunction* spawnFunc = mod->GetFunctionByDecl("void CombatSim::SpawnWave(int)");

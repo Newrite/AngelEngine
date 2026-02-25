@@ -1,8 +1,11 @@
 ﻿#pragma once
 
 #include <angelscript.h>
-#include <print>
 #include <map>
+#include <print>
+
+#include "TestFramework.hpp"
+
 
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
@@ -10,15 +13,20 @@
 import AngelEngine.Interfaces;
 
 // --- Simple Assertion Helper ---
-#define TEST_ASSERT(condition, message) \
-    do { \
-        if (!(condition)) { \
-            std::println(stderr, "[TEST FAILED] {}:{} - {}", __FILE__, __LINE__, message); \
-            std::exit(1); \
-        } else { \
-            std::println("[TEST PASSED] {}:{} - {}", __FILE__, __LINE__, message); \
-        } \
-    } while (0)
+#define TEST_ASSERT(condition, message)                                                                                \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(condition))                                                                                              \
+        {                                                                                                              \
+            std::println(stderr, "[TEST FAILED] {}:{} - {}", __FILE__, __LINE__, message);                             \
+            std::exit(1);                                                                                              \
+        }                                                                                                              \
+        else                                                                                                           \
+        {                                                                                                              \
+            std::println("[TEST PASSED] {}:{} - {}", __FILE__, __LINE__, message);                                     \
+        }                                                                                                              \
+    }                                                                                                                  \
+    while (0)
 
 // --- Mock Game Entity ---
 struct MockActor
@@ -38,10 +46,7 @@ struct MockActor
         registry[id] = this;
     }
 
-    ~MockActor()
-    {
-        registry.erase(id);
-    }
+    ~MockActor() { registry.erase(id); }
 
     // Reference counting for AngelScript (dummy implementation for asOBJ_REF | asOBJ_NOCOUNT)
     void AddRef() {}
@@ -71,11 +76,13 @@ public:
     bool CanHandle(int typeId) const override
     {
         // If typeId is exactly typeId_, it's the object.
-        if (typeId == typeId_) return true;
-        
+        if (typeId == typeId_)
+            return true;
+
         // If typeId is a handle to typeId_, it's the handle.
-        if (typeId == (typeId_ | asTYPEID_OBJHANDLE)) return true;
-        
+        if (typeId == (typeId_ | asTYPEID_OBJHANDLE))
+            return true;
+
         return false;
     }
 
@@ -84,7 +91,7 @@ public:
         MockActor* actor = static_cast<MockActor*>(objectPtr);
         int id = actor ? actor->id : -1;
         stream->Write(&id, sizeof(id));
-        
+
         // Save state (Health)
         if (actor)
         {
@@ -109,11 +116,11 @@ public:
             {
                 std::println(stderr, "[MockActorHandler] Warning: Actor with ID {} not found during restore.", id);
             }
-            
+
             // Restore state (Health)
             int storedHealth = 0;
             stream->Read(&storedHealth, sizeof(storedHealth));
-            
+
             if (foundActor)
             {
                 foundActor->health = storedHealth;
@@ -124,6 +131,8 @@ public:
         MockActor** handle = static_cast<MockActor**>(ptrToHandle);
         *handle = foundActor;
     }
+
+    const char* GetTypeName() const override { return "MockActor"; }
 
 private:
     int typeId_;
@@ -138,24 +147,30 @@ public:
     void Bind(asIScriptEngine* engine) override
     {
         int r = engine->RegisterObjectType("MockActor", 0, asOBJ_REF | asOBJ_NOCOUNT);
-        if (r < 0) std::println(stderr, "RegisterObjectType failed: {}", r);
-        TEST_ASSERT(r >= 0, "Failed to register MockActor type");
+        if (r < 0 && r != asALREADY_REGISTERED)
+            std::println(stderr, "RegisterObjectType failed: {}", r);
+        ASSERT_TRUE(r >= 0 || r == asALREADY_REGISTERED, "Failed to register MockActor type");
 
         r = engine->RegisterObjectProperty("MockActor", "int id", asOFFSET(MockActor, id));
-        if (r < 0) std::println(stderr, "RegisterObjectProperty id failed: {}", r);
-        TEST_ASSERT(r >= 0, "Failed to register MockActor::id");
+        if (r < 0 && r != asALREADY_REGISTERED)
+            std::println(stderr, "RegisterObjectProperty id failed: {}", r);
+        ASSERT_TRUE(r >= 0 || r == asALREADY_REGISTERED, "Failed to register MockActor::id");
 
         r = engine->RegisterObjectProperty("MockActor", "int health", asOFFSET(MockActor, health));
-        if (r < 0) std::println(stderr, "RegisterObjectProperty health failed: {}", r);
-        TEST_ASSERT(r >= 0, "Failed to register MockActor::health");
+        if (r < 0 && r != asALREADY_REGISTERED)
+            std::println(stderr, "RegisterObjectProperty health failed: {}", r);
+        ASSERT_TRUE(r >= 0 || r == asALREADY_REGISTERED, "Failed to register MockActor::health");
 
         r = engine->RegisterGlobalFunction("MockActor@ GetActor(int id)", asFUNCTION(GetActor), asCALL_CDECL);
-        if (r < 0) std::println(stderr, "RegisterGlobalFunction GetActor failed: {}", r);
-        TEST_ASSERT(r >= 0, "Failed to register GetActor");
+        if (r < 0 && r != asALREADY_REGISTERED)
+            std::println(stderr, "RegisterGlobalFunction GetActor failed: {}", r);
+        ASSERT_TRUE(r >= 0 || r == asALREADY_REGISTERED, "Failed to register GetActor");
 
-        r = engine->RegisterGlobalFunction("void print(const string &in)", asFUNCTION(PrintCallback), asCALL_CDECL_OBJLAST, this);
-        if (r < 0) std::println(stderr, "RegisterGlobalFunction print failed: {}", r);
-        TEST_ASSERT(r >= 0, "Failed to register print");
+        r = engine->RegisterGlobalFunction("void print(const string &in)", asFUNCTION(PrintCallback),
+                                           asCALL_CDECL_OBJLAST, this);
+        if (r < 0 && r != asALREADY_REGISTERED)
+            std::println(stderr, "RegisterGlobalFunction print failed: {}", r);
+        ASSERT_TRUE(r >= 0 || r == asALREADY_REGISTERED, "Failed to register print");
     }
 
     static MockActor* GetActor(int id)

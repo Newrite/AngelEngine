@@ -7,7 +7,6 @@ module;
 #include <print>
 
 
-
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
@@ -94,7 +93,21 @@ namespace AngelEngine
                 }
             }
 
-            return TopologicalSort(modsMeta);
+            auto sorted = TopologicalSort(modsMeta);
+            if (!config_.enabledMods.empty())
+            {
+                eastl::vector<eastl::string> filtered;
+                for (const auto& mod : sorted)
+                {
+                    if (eastl::find(config_.enabledMods.begin(), config_.enabledMods.end(), mod) !=
+                        config_.enabledMods.end())
+                    {
+                        filtered.push_back(mod);
+                    }
+                }
+                return filtered;
+            }
+            return sorted;
         }
 
         fs::path GetModPath(const eastl::string& modName) const override

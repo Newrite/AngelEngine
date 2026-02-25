@@ -4,7 +4,7 @@ using namespace AngelEngineTest;
 
 TEST_CASE(Promises, AsyncCoAwait)
 {
-    EngineFixture fixture;
+    EngineFixture fixture(false, {"PromiseTest"});
 
     fixture.WriteAndCompile("PromiseTest", R"(
         promise<int>@ asyncTask() {
@@ -20,7 +20,7 @@ TEST_CASE(Promises, AsyncCoAwait)
         }
     )");
 
-    auto res = fixture.engine->RunMod("PromiseTest");
+    auto res = fixture.engine->RunAllMods();
     ASSERT_TRUE(res.has_value(), "PromiseTest failed to run");
 
     EXPECT_TRUE(fixture.OutputContains("Promise Start"), "Promise should have started");

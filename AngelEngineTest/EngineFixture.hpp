@@ -5,7 +5,9 @@
 
 
 #include <EASTL/memory.h>
+#include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
 #include <filesystem>
 #include <fstream>
 
@@ -23,10 +25,11 @@ namespace AngelEngineTest
     class EngineFixture
     {
     public:
-        EngineFixture(bool useJIT = false)
+        EngineFixture(bool useJIT = false, eastl::vector<eastl::string> enabledMods = {})
         {
             AngelEngine::EngineConfig config{.scriptsPathMod = fs::absolute("angelscripts/mods"),
                                              .asPredefinedPath = fs::absolute("angelscripts/as.predefined"),
+                                             .enabledMods = enabledMods,
                                              .enableAutoReload = false,
                                              .enableWatchdog = true, // Watchdog testing explicitly tested elsewhere
                                              .enableAutoGC = false,

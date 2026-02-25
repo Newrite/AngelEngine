@@ -10,7 +10,7 @@ TEST_CASE(E2E, HotReloadConcurrencyStress)
 {
     // Need JIT disabled for Hot Reload stress, JIT can be sensitive to aggressive file replacements mid-compilation
     // in this specific artificial 0.001ms thread looping scenario compared to real world.
-    EngineFixture fixture(false);
+    EngineFixture fixture(false, {"StressMod"});
 
     fixture.WriteAndCompile("StressMod", R"(
         [Save] int value = 0;
@@ -18,7 +18,7 @@ TEST_CASE(E2E, HotReloadConcurrencyStress)
         void OnTick(float dt) { value += 1; }
     )");
 
-    auto ms = fixture.engine->RunMod("StressMod");
+    auto ms = fixture.engine->RunAllMods();
     ASSERT_TRUE(ms.has_value(), "Init run failed");
 
     std::atomic<bool> keepRunning = true;
