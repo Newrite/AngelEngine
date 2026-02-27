@@ -1,5 +1,4 @@
 ﻿#include <new>
-#include <cstdint>
 #include <cstdio>
 #include <cstdarg>
 #include <mimalloc.h>

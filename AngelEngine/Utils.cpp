@@ -1,9 +1,8 @@
 module;
 
 #include <EASTL/string.h>
-#include <angelscript.h>
-#include <cstdint>
 
+#include <angelscript.h>
 
 export module AngelEngine.Utils;
 

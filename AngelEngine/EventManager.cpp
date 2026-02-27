@@ -1,13 +1,14 @@
 ﻿module;
 
 #include <EABase/eabase.h>
+#include <EASTL/expected.h>
+#include <EASTL/vector.h>
+#include <EASTL/vector_map.h>
+
 #include <angelscript.h>
 #include <mutex>
 #include <print>
 
-#include <EASTL/expected.h>
-#include <EASTL/vector.h>
-#include <EASTL/vector_map.h>
 
 
 export module AngelEngine.EventManager;

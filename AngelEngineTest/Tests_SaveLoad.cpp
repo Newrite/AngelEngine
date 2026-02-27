@@ -32,7 +32,7 @@ TEST_CASE(SaveLoad, SaveDataAndHotReload)
     auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "Run failed.");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     ASSERT_TRUE(mod != nullptr, "Module __Megamodule__ not found");
 
     int varIdx = mod->GetGlobalVarIndexByName("TestMod::globalCounter");
@@ -58,7 +58,7 @@ TEST_CASE(SaveLoad, SaveDataAndHotReload)
     auto reloadRes = fixture.engine->HotReload();
     ASSERT_TRUE(reloadRes.has_value(), "HotReload failed");
 
-    mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     varIdx = mod->GetGlobalVarIndexByName("TestMod::globalCounter");
     counterPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 
@@ -123,7 +123,7 @@ TEST_CASE(SaveLoad, SkipMissingVariable)
     auto loadRes = saveLoadManager->LoadFromData(fixture.engine->GetEngine(), saveBlob);
     ASSERT_TRUE(loadRes.has_value(), "Load should succeed and skip oldVar");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     int varIdx = mod->GetGlobalVarIndexByName("TestMod::newVar");
     int* newVarPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 

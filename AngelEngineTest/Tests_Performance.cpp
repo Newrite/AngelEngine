@@ -67,7 +67,7 @@ TEST_CASE(Performance, HeavyMathAndBranching)
         }
     )");
 
-    asIScriptModule* mathMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mathMod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
 
     // N-Body Math Stress
     auto ctxPtr = fixture.engine->GetExecutionManager()->RequestContext(fixture.engine->GetEngine(), nullptr);

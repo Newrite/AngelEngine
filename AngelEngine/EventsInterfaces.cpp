@@ -1,10 +1,11 @@
 module;
+
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 
 #include <angelscript.h>
 
-export module AngelEngine.Events.Interfaces;
+export module AngelEngine.EventsInterfaces;
 
 namespace AngelEngine
 {

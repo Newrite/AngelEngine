@@ -1,4 +1,5 @@
 module;
+
 #include <angelscript.h>
 
 export module AngelEngine.StickyContext;

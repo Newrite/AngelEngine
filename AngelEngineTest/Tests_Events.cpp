@@ -27,7 +27,7 @@ TEST_CASE(Events, Dispatching)
     auto res = fixture.engine->RunAllMods();
     ASSERT_TRUE(res.has_value(), "EventTest failed to run");
 
-    asIScriptModule* eventMod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* eventMod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     asIScriptFunction* subFunc = eventMod->GetFunctionByDecl("void EventTest::SubscribeToEvents()");
 
     {

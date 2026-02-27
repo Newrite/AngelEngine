@@ -1,20 +1,5 @@
 module;
 
-#include <angelscript.h>
-#include <filesystem>
-#include <mutex>
-#include <print>
-#include <scriptbuilder.h>
-
-
-// Подключаем стандартные потоки для чтения файлов в память
-#include <fstream>
-#include <sstream>
-
-
-// Подключаем заголовочный файл aspromise для парсера co_await
-// (Убедись, что путь совпадает с тем, куда ты положил promise.hpp)
-#include "scriptpromise/aspromise.hpp"
 
 #include <EABase/eabase.h>
 #include <EASTL/expected.h>
@@ -22,6 +7,16 @@ module;
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
+
+#include <filesystem>
+#include <mutex>
+#include <print>
+#include <scriptbuilder.h>
+
+#include <fstream>
+
+#include <angelscript.h>
+#include "scriptpromise/aspromise.hpp"
 
 
 export module AngelEngine.ModuleLoader;
@@ -97,7 +92,7 @@ namespace AngelEngine
                 saveable_vars_cache_.clear();
 
                 builder_ = eastl::make_unique<CScriptBuilder>();
-                int r = builder_->StartNewModule(engine, "__Megamodule__");
+                int r = builder_->StartNewModule(engine, MegaModuleName);
                 if (r < 0)
                 {
                     Log::Error("[ScriptEngine] Failed to create __Megamodule__ with AS code: {}", r);
@@ -130,7 +125,7 @@ namespace AngelEngine
                 if (r < 0)
                 {
                     Log::Error("[ScriptEngine] __Megamodule__ Compilation FAILED with AS code: {}", r);
-                    engine->DiscardModule("__Megamodule__");
+                    engine->DiscardModule(MegaModuleName);
 
                     if (!faulty_modules_.empty())
                     {

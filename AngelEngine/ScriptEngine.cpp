@@ -1,19 +1,16 @@
 module;
 
-#include <format>
-#include <shared_mutex>
-
-
-// ЗАМЕНИЛИ <as_jit.h> на <angelsea.hpp>
-#include <angelscript.h>
-#include <angelsea.hpp>
-
-
 #include <EASTL/algorithm.h>
 #include <EASTL/expected.h>
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
+
+#include <format>
+#include <shared_mutex>
+
+#include <angelscript.h>
+#include <angelsea.hpp>
 
 import AngelEngine.NativeViewArray;
 
@@ -34,7 +31,7 @@ import AngelEngine.FrameAllocator;
 import AngelEngine.Memory;
 import AngelEngine.Errors;
 import AngelEngine.Types;
-import AngelEngine.Events.Interfaces;
+import AngelEngine.EventsInterfaces;
 
 namespace AngelEngine
 {
@@ -281,9 +278,7 @@ namespace AngelEngine
                 Log::Error("[ScriptEngine] Failed to register standard addons.");
                 return eastl::unexpected(EngineError::GenericError);
             }
-
-            executionManager_->RegisterThreadSupport(engine_.get());
-
+            
             RegisterNativeViewArray();
 
             auto bindResult = BindAll();
@@ -411,7 +406,7 @@ namespace AngelEngine
 
         void WireDispatchers(const eastl::vector<ChannelDescriptor>& descriptors) const
         {
-            asIScriptModule* mod = engine_->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
+            asIScriptModule* mod = engine_->GetModule(MegaModuleName, asGM_ONLY_IF_EXISTS);
             if (!mod)
             {
                 Log::Error("[ScriptEngine] WireDispatchers: __Megamodule__ not found.");

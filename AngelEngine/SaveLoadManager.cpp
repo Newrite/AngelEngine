@@ -1,14 +1,12 @@
 ﻿module;
 
 #include <EABase/eabase.h>
-#include <angelscript.h>
-#include <cstring>
-
 #include <EASTL/expected.h>
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 #include <EASTL/vector_map.h>
 
+#include <angelscript.h>
 
 export module AngelEngine.SaveLoadManager;
 

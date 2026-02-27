@@ -62,7 +62,7 @@ TEST_CASE(E2E, HotReloadConcurrencyStress)
 
     EXPECT_TRUE(tickCount > 10, "Ticker thread was permanently blocked/deadlocked by HotReloads.");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     int varIdx = mod->GetGlobalVarIndexByName("StressMod::value");
     int* valPtr = (int*)mod->GetAddressOfGlobalVar(varIdx);
 

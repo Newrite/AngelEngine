@@ -1,7 +1,6 @@
 #include <EASTL/vector.h>
 #include "EngineFixture.hpp"
 
-
 using namespace AngelEngineTest;
 
 TEST_CASE(E2E, CombatSimulationWithGarbageCollection)
@@ -53,7 +52,7 @@ TEST_CASE(E2E, CombatSimulationWithGarbageCollection)
     auto ms = fixture.engine->RunAllMods();
     ASSERT_TRUE(ms.has_value(), "Failed to run all mods");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     asIScriptFunction* spawnFunc = mod->GetFunctionByDecl("void CombatSim::SpawnWave(int)");
     asIScriptFunction* combatFunc = mod->GetFunctionByDecl("void CombatSim::SimulateCombatRound()");
     asIScriptFunction* countFunc = mod->GetFunctionByDecl("int CombatSim::GetActiveEntityCount()");

@@ -1,21 +1,13 @@
 ﻿module;
 
-#include <EABase/eabase.h>
 #include <EASTL/array.h>
 #include <EASTL/atomic.h>
 #include <EASTL/chrono.h>
 #include <EASTL/expected.h>
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
+
 #include <angelscript.h>
-#include <cstdio>
-#include <scriptarray.h>
-
-
-import AngelEngine.NativeViewArray;
-import AngelEngine.StickyContext;
-import AngelEngine.Events.Interfaces;
-import AngelEngine.Utils;
 
 // Set to 1 to enable microsecond-precision timing logs for AS dispatch calls.
 #define ANGEL_PROFILE_EVENTS 0
@@ -25,6 +17,10 @@ export module AngelEngine.EventChannel;
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
 import AngelEngine.FrameAllocator;
+import AngelEngine.NativeViewArray;
+import AngelEngine.StickyContext;
+import AngelEngine.EventsInterfaces;
+import AngelEngine.Utils;
 
 namespace AngelEngine
 {

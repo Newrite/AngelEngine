@@ -57,7 +57,7 @@ TEST_CASE(Benchmark, EventDispatchThroughput)
     auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "BenchmarkMod failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     asIScriptFunction* subFn = mod->GetFunctionByDecl("void BenchmarkMod::SubscribeAll()");
     ASSERT_TRUE(subFn != nullptr, "SubscribeAll not found");
 
@@ -107,7 +107,7 @@ TEST_CASE(Benchmark, TickCall_Before)
     auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "TickMod failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     asIScriptFunction* tickFn = mod->GetFunctionByDecl("void TickMod::OnTick()");
     ASSERT_TRUE(tickFn != nullptr, "OnTick() not found");
 
@@ -151,7 +151,7 @@ TEST_CASE(Benchmark, TickCall_After)
     auto runRes = fixture.engine->RunAllMods();
     ASSERT_TRUE(runRes.has_value(), "TickModSticky failed to run");
 
-    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule("__Megamodule__");
+    asIScriptModule* mod = fixture.engine->GetEngine()->GetModule(AngelEngine::MegaModuleName);
     asIScriptFunction* tickFn = mod->GetFunctionByDecl("void TickModSticky::OnTick()");
     ASSERT_TRUE(tickFn != nullptr, "OnTick() not found in TickModSticky");
 

@@ -2,7 +2,6 @@
 
 #include <EASTL/string.h>
 #include <angelscript.h>
-#include <ostream>
 #include <print>
 
 
@@ -11,6 +10,7 @@ export module AngelEngine.EventsBinding;
 import AngelEngine.Interfaces;
 import AngelEngine.EventChannel;
 import AngelEngine.Logger;
+import AngelEngine.EventsInterfaces;
 
 namespace AngelEngine
 {

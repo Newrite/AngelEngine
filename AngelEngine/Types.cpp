@@ -2,6 +2,7 @@ module;
 
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
+
 #include <filesystem>
 #include <angelscript.h>
 
@@ -10,7 +11,7 @@ export module AngelEngine.Types;
 namespace AngelEngine
 {
     
-    export inline constexpr const char* MegaModuleName = "__Megamodule__";
+    export inline constexpr std::string_view MegaModuleName = "__Megamodule__";
 
     // AngelScript reserves IDs 1000 to 1999 for official add-ons.
     // Any custom engine user data must strictly fall outside this range.

@@ -1,18 +1,16 @@
 ﻿module;
 
+#include <EASTL/atomic.h>
+#include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <print>
 #include <thread>
 #include <windows.h>
-
-
-#include <EASTL/atomic.h>
-#include <EASTL/string.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/vector.h>
-
 
 export module AngelEngine.ScriptWatcher;
 

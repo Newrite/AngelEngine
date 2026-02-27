@@ -1,12 +1,11 @@
 module;
 
 #include <EASTL\vector.h>
-#include <cassert>
+
 #include <cstdio> // Для надежного C-style FILE*
 #include <filesystem>
 #include <format>
 #include <string>
-
 
 #include "angelscript.h"
 
@@ -14,6 +13,7 @@ export module AngelEngine.PredefinedGenerator;
 
 import AngelEngine.Logger;
 import AngelEngine.Interfaces;
+import AngelEngine.EventsInterfaces;
 
 namespace AngelEngine
 {

@@ -1,16 +1,14 @@
 module;
 
+#include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 #include <angelscript.h>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <print>
-
-
-#include <EASTL/string.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/vector.h>
-
 
 export module AngelEngine.Infrastructure;
 

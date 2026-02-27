@@ -2,7 +2,6 @@
 
 #include <EABASE/eabase.h>
 #include <EASTL/expected.h>
-#include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
 #include <angelscript.h>
 

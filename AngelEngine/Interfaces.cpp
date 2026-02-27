@@ -2,22 +2,19 @@ module;
 
 #include <EABase/eabase.h>
 #include <EASTL/expected.h>
-#include <EASTL/functional.h>
 #include <EASTL/string.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/vector.h>
-#include <angelscript.h>
-#include <chrono>
-#include <eastl/memory.h>
-#include <eastl/type_traits.h>
+
 #include <filesystem>
-#include <mutex>
+
+#include <angelscript.h>
 
 
 export module AngelEngine.Interfaces;
 
 export import AngelEngine.Errors;
-export import AngelEngine.Events.Interfaces;
+export import AngelEngine.EventsInterfaces;
 export import AngelEngine.Types;
 export import AngelEngine.Utils;
 
@@ -113,9 +110,7 @@ namespace AngelEngine
         virtual eastl::expected<void, ExecutionError> Tick(const float deltaTime, IEventManager* eventManager,
                                                            asIScriptEngine* engine,
                                                            IBuiltinEventDispatcher* dispatcher) = 0;
-
         virtual void Renew() = 0;
-        virtual void WarmUpPool(asIScriptEngine* engine) = 0;
         virtual eastl::expected<int, ExecutionError> ExecuteManaged(asIScriptContext* ctx) = 0;
         virtual eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
                                                                  const IModuleLoader* moduleLoader) = 0;

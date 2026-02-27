@@ -1,5 +1,12 @@
 module;
 
+#include <EASTL/atomic.h>
+#include <EASTL/chrono.h>
+#include <EASTL/expected.h>
+#include <EASTL/string.h>
+#include <EASTL/unique_ptr.h>
+#include <EASTL/vector.h>
+
 #include <condition_variable>
 #include <filesystem>
 #include <format>
@@ -10,19 +17,13 @@ module;
 
 #include <angelscript.h>
 
-#include <EASTL/atomic.h>
-#include <EASTL/chrono.h>
-#include <EASTL/expected.h>
-#include <EASTL/string.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/vector.h>
-
 
 export module AngelEngine.ExecutionManager;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
 import AngelEngine.Errors;
+import AngelEngine.EventsInterfaces;
 
 
 namespace fs = std::filesystem;
@@ -258,7 +259,7 @@ namespace AngelEngine
 
         eastl::expected<void, ExecutionError> StartContextHelper(asIScriptEngine* engine, const eastl::string& modName)
         {
-            asIScriptModule* mod = engine->GetModule("__Megamodule__", asGM_ONLY_IF_EXISTS);
+            asIScriptModule* mod = engine->GetModule(MegaModuleName, asGM_ONLY_IF_EXISTS);
             if (!mod)
                 return eastl::unexpected(ExecutionError::NoModsLoadedToRun);
 
