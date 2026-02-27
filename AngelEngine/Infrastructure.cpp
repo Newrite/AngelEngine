@@ -20,6 +20,7 @@ import AngelEngine.SaveLoadManager;
 import AngelEngine.BindingManager;
 import AngelEngine.EventManager;
 import AngelEngine.ScriptWatcher;
+import AngelEngine.Types;
 
 namespace fs = std::filesystem;
 

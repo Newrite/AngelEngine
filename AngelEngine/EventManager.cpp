@@ -14,7 +14,9 @@
 export module AngelEngine.EventManager;
 
 import AngelEngine.Interfaces;
+import AngelEngine.EventsInterfaces;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
 
 namespace AngelEngine
 {

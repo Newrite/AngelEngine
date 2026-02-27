@@ -10,25 +10,25 @@ module;
 
 #include <angelscript.h>
 
-
 export module AngelEngine.Interfaces;
 
-export import AngelEngine.Errors;
-export import AngelEngine.EventsInterfaces;
-export import AngelEngine.Types;
-export import AngelEngine.Utils;
+import AngelEngine.Errors;
+import AngelEngine.EventsInterfaces;
+import AngelEngine.Types;
+import AngelEngine.Utils;
 
 namespace AngelEngine
 {
-
     // --- Pattern Interfaces ---
 
     export struct IScriptSourceProvider
     {
         virtual ~IScriptSourceProvider() = default;
         virtual eastl::vector<eastl::string> GetAvailableMods() const = 0;
-        virtual std::filesystem::path GetModPath(const eastl::string& modName) const = 0;
-        virtual eastl::vector<std::filesystem::path> GetScriptFiles(const std::filesystem::path& rootPath) const = 0;
+        virtual std::filesystem::path
+        GetModPath(const eastl::string& modName) const = 0;
+        virtual eastl::vector<std::filesystem::path>
+        GetScriptFiles(const std::filesystem::path& rootPath) const = 0;
     };
 
     export struct IScriptBinding
@@ -37,17 +37,18 @@ namespace AngelEngine
         virtual void Bind(asIScriptEngine* engine) = 0;
     };
 
-
     // --- Component Interfaces ---
 
     export struct IModuleLoader
     {
         virtual ~IModuleLoader() = default;
-        virtual eastl::expected<void, ModuleLoaderError>
-        CompileAllMods(asIScriptEngine* engine, const eastl::vector<ChannelDescriptor>& eventDescriptors = {}) = 0;
+        virtual eastl::expected<void, ModuleLoaderError> CompileAllMods(
+            asIScriptEngine* engine,
+            const eastl::vector<ChannelDescriptor>& eventDescriptors = {}) = 0;
         virtual const eastl::vector<eastl::string>& GetLoadedModules() const = 0;
         virtual bool Empty() const = 0;
-        virtual const eastl::vector<eastl::string>& GetSaveableVars(const eastl::string& modName) const = 0;
+        virtual const eastl::vector<eastl::string>&
+        GetSaveableVars(const eastl::string& modName) const = 0;
         virtual void RecordCompilationError(const eastl::string& sectionName) = 0;
     };
 
@@ -59,7 +60,8 @@ namespace AngelEngine
         virtual eastl::expected<void, EventError> ProcessDeferred() = 0;
         virtual void Clear() = 0;
         virtual ChannelDescriptor GetDescriptor() const = 0;
-        virtual void SetDispatcherFn(asIScriptEngine* engine, IContextPooling* pool, asIScriptFunction* fn) = 0;
+        virtual void SetDispatcherFn(asIScriptEngine* engine, IContextPooling* pool,
+                                     asIScriptFunction* fn) = 0;
         virtual void WarmupJIT() = 0;
     };
 
@@ -67,11 +69,13 @@ namespace AngelEngine
     {
         virtual ~IEventManager() = default;
 
-        virtual eastl::expected<void, EventError> RegisterChannel(uint32_t eventId, IEventChannel* channel) = 0;
+        virtual eastl::expected<void, EventError>
+        RegisterChannel(uint32_t eventId, IEventChannel* channel) = 0;
         virtual void UnregisterChannel(uint32_t eventId) = 0;
         virtual IEventChannel* GetChannel(uint32_t eventId) const = 0;
 
-        virtual eastl::expected<void, EventError> ProcessAllDeferred(asIScriptContext* sharedCtx) = 0;
+        virtual eastl::expected<void, EventError>
+        ProcessAllDeferred(asIScriptContext* sharedCtx) = 0;
         virtual void ClearAll() = 0;
 
         // Returns descriptors for all currently registered channels.
@@ -79,13 +83,13 @@ namespace AngelEngine
         virtual eastl::vector<ChannelDescriptor> GetAllDescriptors() const = 0;
     };
 
-
     export struct IContextPooling
     {
         struct ContextDeleter
         {
             IContextPooling* pool;
             asIScriptEngine* engine;
+
             void operator()(asIScriptContext* ctx) const
             {
                 if (pool && ctx)
@@ -99,7 +103,8 @@ namespace AngelEngine
 
         virtual ~IContextPooling() = default;
         virtual ContextPtr RequestContext(asIScriptEngine* engine, void* param) = 0;
-        virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx, void* param) = 0;
+        virtual void ReturnContext(asIScriptEngine* engine, asIScriptContext* ctx,
+                                   void* param) = 0;
     };
 
     // ContextPooling ends
@@ -107,51 +112,64 @@ namespace AngelEngine
     export struct IExecutionManager : IContextPooling
     {
         virtual ~IExecutionManager() = default;
-        virtual eastl::expected<void, ExecutionError> Tick(const float deltaTime, IEventManager* eventManager,
-                                                           asIScriptEngine* engine,
-                                                           IBuiltinEventDispatcher* dispatcher) = 0;
+        virtual eastl::expected<void, ExecutionError>
+        Tick(const float deltaTime, IEventManager* eventManager,
+             asIScriptEngine* engine, IBuiltinEventDispatcher* dispatcher) = 0;
         virtual void Renew() = 0;
-        virtual eastl::expected<int, ExecutionError> ExecuteManaged(asIScriptContext* ctx) = 0;
-        virtual eastl::expected<void, ExecutionError> RunAllMods(asIScriptEngine* engine,
-                                                                 const IModuleLoader* moduleLoader) = 0;
+        virtual eastl::expected<int, ExecutionError>
+        ExecuteManaged(asIScriptContext* ctx) = 0;
+        virtual eastl::expected<void, ExecutionError>
+        RunAllMods(asIScriptEngine* engine, const IModuleLoader* moduleLoader) = 0;
     };
 
     export struct IReloadManager
     {
         virtual ~IReloadManager() = default;
-        virtual eastl::expected<void, ReloadError> ReloadScripts(asIScriptEngine* engine, IModuleLoader* moduleLoader,
-                                                                 IExecutionManager* executionManager,
-                                                                 IEventManager* eventManager) = 0;
+        virtual eastl::expected<void, ReloadError>
+        ReloadScripts(asIScriptEngine* engine, IModuleLoader* moduleLoader,
+                      IExecutionManager* executionManager,
+                      IEventManager* eventManager) = 0;
     };
 
     export struct ISerializationHandler
     {
         virtual ~ISerializationHandler() = default;
         virtual bool CanHandle(int typeId) const = 0;
-        // Returns a stable string identifier for this handler's type, written into the save format.
-        // Must remain constant across versions — changing it will break existing saves.
-        // Example: "ActorHandle", "QuestData", etc.
+        // Returns a stable string identifier for this handler's type, written into
+        // the save format. Must remain constant across versions — changing it will
+        // break existing saves. Example: "ActorHandle", "QuestData", etc.
         virtual const char* GetTypeName() const = 0;
-        virtual void Save(asIScriptEngine* engine, void* objectPtr, asIBinaryStream* stream) = 0;
-        virtual void Restore(asIScriptEngine* engine, void* ptrToHandle, asIBinaryStream* stream) = 0;
+        virtual void SetSerializer(void* serializer) = 0;
+        virtual void SetEngine(asIScriptEngine* engine) = 0;
+        virtual void Save(asIScriptEngine* engine, void* objectPtr,
+                          asIBinaryStream* stream) = 0;
+        virtual void Restore(asIScriptEngine* engine, void* ptrToHandle,
+                             asIBinaryStream* stream) = 0;
+        // Helper methods for recursive serialization - implemented by
+        // BinarySerializer
+        virtual bool SerializeValue(void* ptr, int typeId, asIBinaryStream* stream,
+                                    bool isSave) = 0;
     };
 
     export struct ISaveLoadManager
     {
         virtual ~ISaveLoadManager() = default;
-        virtual eastl::expected<eastl::vector<uint8_t>, SerializationError> GetSaveData(asIScriptEngine* engine,
-                                                                                        IModuleLoader* loader) = 0;
-        virtual eastl::expected<void, SerializationError> LoadFromData(asIScriptEngine* engine,
-                                                                       const eastl::vector<uint8_t>& data) = 0;
+        virtual eastl::expected<eastl::vector<uint8_t>, SerializationError>
+        GetSaveData(asIScriptEngine* engine, IModuleLoader* loader) = 0;
+        virtual eastl::expected<void, SerializationError>
+        LoadFromData(asIScriptEngine* engine, const eastl::vector<uint8_t>& data) = 0;
         virtual void AddHandler(ISerializationHandler* handler) = 0;
     };
 
     export struct IBindingManager
     {
         virtual ~IBindingManager() = default;
-        virtual eastl::expected<void, BindingError> RegisterStandardAddons(asIScriptEngine* engine) = 0;
-        virtual eastl::expected<void, BindingError> BindAll(asIScriptEngine* const engine) = 0;
-        virtual eastl::expected<void, BindingError> Bind(asIScriptEngine* const engine, IScriptBinding* binding) = 0;
+        virtual eastl::expected<void, BindingError>
+        RegisterStandardAddons(asIScriptEngine* engine) = 0;
+        virtual eastl::expected<void, BindingError>
+        BindAll(asIScriptEngine* const engine) = 0;
+        virtual eastl::expected<void, BindingError>
+        Bind(asIScriptEngine* const engine, IScriptBinding* binding) = 0;
         virtual void AddBinding(IScriptBinding* binding) = 0;
     };
 
@@ -178,16 +196,38 @@ namespace AngelEngine
     export struct IEngineListener
     {
         virtual ~IEngineListener() = default;
-        virtual void OnEngineInitialized(asIScriptEngine* engine, IBindingManager* bindingManager,
-                                         IModuleLoader* moduleLoader, IExecutionManager* executionManager)
+
+        virtual void OnEngineInitialized(asIScriptEngine* engine,
+                                         IBindingManager* bindingManager,
+                                         IModuleLoader* moduleLoader,
+                                         IExecutionManager* executionManager)
         {
         }
-        virtual void OnCompilationStarted(asIScriptEngine* engine) {}
-        virtual void OnCompilationFinished(asIScriptEngine* engine, bool success) {}
-        virtual void OnHotReloadStarted(asIScriptEngine* engine) {}
-        virtual void OnHotReloadFinished(asIScriptEngine* engine) {}
-        virtual void OnAddBinding(asIScriptEngine* engine, IScriptBinding* binding) {}
-        virtual void OnScriptMessage(asIScriptEngine* engine, const asSMessageInfo* msg) {}
+
+        virtual void OnCompilationStarted(asIScriptEngine* engine)
+        {
+        }
+
+        virtual void OnCompilationFinished(asIScriptEngine* engine, bool success)
+        {
+        }
+
+        virtual void OnHotReloadStarted(asIScriptEngine* engine)
+        {
+        }
+
+        virtual void OnHotReloadFinished(asIScriptEngine* engine)
+        {
+        }
+
+        virtual void OnAddBinding(asIScriptEngine* engine, IScriptBinding* binding)
+        {
+        }
+
+        virtual void OnScriptMessage(asIScriptEngine* engine,
+                                     const asSMessageInfo* msg)
+        {
+        }
     };
 
     export struct IScriptEngineGetters

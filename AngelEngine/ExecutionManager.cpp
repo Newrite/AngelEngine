@@ -24,6 +24,7 @@ import AngelEngine.Interfaces;
 import AngelEngine.Logger;
 import AngelEngine.Errors;
 import AngelEngine.EventsInterfaces;
+import AngelEngine.Types;
 
 
 namespace fs = std::filesystem;

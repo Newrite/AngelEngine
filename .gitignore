@@ -1,0 +1,21 @@
+# Xmake cache
+.xmake/
+build/
+
+# MacOS Cache
+.DS_Store
+
+# Visual Studio Code
+.vscode/
+
+# JetBrains IDEs
+.idea/
+
+.cache/
+
+angelscripts/
+
+vsxmake2026/
+
+OvergrowthScripting/
+eastldoc/

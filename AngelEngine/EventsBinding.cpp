@@ -11,6 +11,7 @@ import AngelEngine.Interfaces;
 import AngelEngine.EventChannel;
 import AngelEngine.Logger;
 import AngelEngine.EventsInterfaces;
+import AngelEngine.Utils;
 
 namespace AngelEngine
 {

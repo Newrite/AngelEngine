@@ -22,7 +22,10 @@ module;
 export module AngelEngine.ModuleLoader;
 
 import AngelEngine.Interfaces;
+import AngelEngine.EventsInterfaces;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
+import AngelEngine.Types;
 
 namespace fs = std::filesystem;
 

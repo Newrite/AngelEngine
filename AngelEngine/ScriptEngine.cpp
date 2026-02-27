@@ -32,6 +32,8 @@ import AngelEngine.Memory;
 import AngelEngine.Errors;
 import AngelEngine.Types;
 import AngelEngine.EventsInterfaces;
+import AngelEngine.SerializationHandlers;
+import AngelEngine.Utils;
 
 namespace AngelEngine
 {
@@ -278,7 +280,17 @@ namespace AngelEngine
                 Log::Error("[ScriptEngine] Failed to register standard addons.");
                 return eastl::unexpected(EngineError::GenericError);
             }
-            
+
+            // Register serialization handlers for array<T> and dictionary
+            // These handlers must be registered BEFORE any save/load operations
+            // Note: serializer will be set by SaveLoadManager when GetSaveData/LoadFromData is called
+            auto* arrayHandler = new ArraySerializationHandler();
+            auto* dictHandler = new DictionarySerializationHandler();
+            arrayHandler->SetEngine(engine_.get());
+            dictHandler->SetEngine(engine_.get());
+            saveLoadManager_->AddHandler(arrayHandler);
+            saveLoadManager_->AddHandler(dictHandler);
+
             RegisterNativeViewArray();
 
             auto bindResult = BindAll();

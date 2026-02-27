@@ -3,37 +3,36 @@ module;
 #include <EASTL/string.h>
 #include <EASTL/vector.h>
 
-#include <filesystem>
 #include <angelscript.h>
+#include <filesystem>
+
 
 export module AngelEngine.Types;
 
-namespace AngelEngine
-{
-    
-    export inline constexpr std::string_view MegaModuleName = "__Megamodule__";
+namespace AngelEngine {
 
-    // AngelScript reserves IDs 1000 to 1999 for official add-ons.
-    // Any custom engine user data must strictly fall outside this range.
-    export enum class AsUserDataId : asPWORD {
-        ExecutionPoolIndex = 2000, // Для пула контекстов
-        ExecutionGeneration = 2001, // хранит эпоху в которой был создан
-        CoroutinePromise = 2002, // На будущее, для асинхронщины
-        WatchdogTimestamp = 2003 // Для отслеживания зависаний
-    };
+export inline constexpr const char *MegaModuleName = "__Megamodule__";
 
-    // --- Configuration Structures ---
-    export struct EngineConfig final
-    {
-        std::filesystem::path scriptsPathMod;
-        std::filesystem::path asPredefinedPath;
+// AngelScript reserves IDs 1000 to 1999 for official add-ons.
+// Any custom engine user data must strictly fall outside this range.
+export enum class AsUserDataId : asPWORD {
+  ExecutionPoolIndex = 2000,  // Для пула контекстов
+  ExecutionGeneration = 2001, // хранит эпоху в которой был создан
+  CoroutinePromise = 2002,    // На будущее, для асинхронщины
+  WatchdogTimestamp = 2003    // Для отслеживания зависаний
+};
 
-        eastl::vector<eastl::string> enabledMods;
+// --- Configuration Structures ---
+export struct EngineConfig final {
+  std::filesystem::path scriptsPathMod;
+  std::filesystem::path asPredefinedPath;
 
-        bool enableAutoReload = false;
-        bool enableWatchdog = true;
-        bool enableAutoGC = false;
-        bool enableUseJIT = false;
-        int64_t maxScriptExecutionTimeMs = 1000;
-    };
+  eastl::vector<eastl::string> enabledMods;
+
+  bool enableAutoReload = false;
+  bool enableWatchdog = true;
+  bool enableAutoGC = false;
+  bool enableUseJIT = false;
+  int64_t maxScriptExecutionTimeMs = 1000;
+};
 } // namespace AngelEngine

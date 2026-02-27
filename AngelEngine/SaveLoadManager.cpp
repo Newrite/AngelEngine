@@ -8,10 +8,14 @@
 
 #include <angelscript.h>
 
+#include <cstring>
+
 export module AngelEngine.SaveLoadManager;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
+import AngelEngine.Types;
 
 namespace AngelEngine
 {
@@ -24,7 +28,7 @@ namespace AngelEngine
     constexpr uint32_t MAX_SAFE_STRING_LEN = 1024 * 1024; // 1 MB limit for actual string values
     constexpr int MAX_RECURSION_DEPTH = 64;
 
-    class ByteStreamWriter : public asIBinaryStream
+    export class ByteStreamWriter : public asIBinaryStream
     {
     public:
         ByteStreamWriter(eastl::vector<uint8_t>& buffer) : buffer_(buffer) {}
@@ -51,7 +55,7 @@ namespace AngelEngine
         eastl::vector<uint8_t>& buffer_;
     };
 
-    class ByteStreamReader : public asIBinaryStream
+    export class ByteStreamReader : public asIBinaryStream
     {
     public:
         ByteStreamReader(const eastl::vector<uint8_t>& buffer) : buffer_(buffer), readPos_(0) {}
@@ -111,7 +115,7 @@ namespace AngelEngine
         }
     }
 
-    class BinarySerializer
+    export class BinarySerializer : public ISerializationHandler
     {
     public:
         BinarySerializer(asIScriptEngine* engine, asIBinaryStream* stream,
@@ -119,6 +123,22 @@ namespace AngelEngine
             engine_(engine), stream_(stream), handlers_(handlers), depth_(0)
         {
             stringTypeId_ = engine_->GetTypeIdByDecl("string");
+        }
+
+        // ISerializationHandler interface - BinarySerializer acts as the root serializer
+        bool CanHandle(int typeId) const override { return false; }
+        const char* GetTypeName() const override { return "BinarySerializer"; }
+        void SetSerializer(void* serializer) override {}
+        void SetEngine(asIScriptEngine* engine) override {}
+        void Save(asIScriptEngine* engine, void* objectPtr, asIBinaryStream* stream) override {}
+        void Restore(asIScriptEngine* engine, void* ptrToHandle, asIBinaryStream* stream) override {}
+        
+        bool SerializeValue(void* ptr, int typeId, asIBinaryStream* stream, bool isSave) override
+        {
+            if (isSave)
+                return SaveValueInternalRecursive(ptr, typeId, stream);
+            else
+                return LoadValueInternalRecursive(ptr, typeId, stream);
         }
 
         bool SaveValue(void* ptr, int typeId)
@@ -274,8 +294,21 @@ namespace AngelEngine
         }
 
     public:
-        // Public access to Internal methods for top-level length wrapping
+        // Public access to Internal methods for use by SerializationHandlers
+        // These do NOT modify depth_ - caller is responsible for depth management
         bool SaveValueInternal(void* ptr, int typeId, asIBinaryStream* targetStream)
+        {
+            return SaveValueInternalRecursive(ptr, typeId, targetStream);
+        }
+
+        bool LoadValueInternal(void* ptr, int typeId, asIBinaryStream* sourceStream)
+        {
+            return LoadValueInternalRecursive(ptr, typeId, sourceStream);
+        }
+
+    private:
+        // Internal recursive implementation
+        bool SaveValueInternalRecursive(void* ptr, int typeId, asIBinaryStream* targetStream)
         {
             if (auto* handler = GetHandler(typeId))
             {
@@ -314,7 +347,7 @@ namespace AngelEngine
                         if (depth_ >= MAX_RECURSION_DEPTH)
                             return false;
                         depth_++;
-                        bool res = SaveValueInternal(obj, type->GetTypeId(), targetStream);
+                        bool res = SaveValueInternalRecursive(obj, type->GetTypeId(), targetStream);
                         depth_--;
                         return res;
                     }
@@ -341,7 +374,7 @@ namespace AngelEngine
                     if (depth_ >= MAX_RECURSION_DEPTH)
                         return false;
                     depth_++;
-                    bool res = SaveValueInternal(propPtr, propTypeId, targetStream);
+                    bool res = SaveValueInternalRecursive(propPtr, propTypeId, targetStream);
                     depth_--;
                     if (!res)
                         return false;
@@ -360,7 +393,7 @@ namespace AngelEngine
             return false;
         }
 
-        bool LoadValueInternal(void* ptr, int typeId, asIBinaryStream* sourceStream)
+        bool LoadValueInternalRecursive(void* ptr, int typeId, asIBinaryStream* sourceStream)
         {
             if (auto* handler = GetHandler(typeId))
             {
@@ -416,7 +449,7 @@ namespace AngelEngine
                     if (depth_ >= MAX_RECURSION_DEPTH)
                         return false;
                     depth_++;
-                    bool res = LoadValueInternal(*handlePtr, type->GetTypeId(), sourceStream);
+                    bool res = LoadValueInternalRecursive(*handlePtr, type->GetTypeId(), sourceStream);
                     depth_--;
                     return res;
                 }
@@ -441,7 +474,7 @@ namespace AngelEngine
                     if (depth_ >= MAX_RECURSION_DEPTH)
                         return false;
                     depth_++;
-                    bool res = LoadValueInternal(propPtr, propTypeId, sourceStream);
+                    bool res = LoadValueInternalRecursive(propPtr, propTypeId, sourceStream);
                     depth_--;
                     if (!res)
                         return false;
@@ -499,6 +532,12 @@ namespace AngelEngine
             eastl::vector<uint8_t> outData;
             ByteStreamWriter stream(outData);
             BinarySerializer serializer(engine, &stream, handlers_);
+
+            // Set serializer for all handlers
+            for (auto* handler : handlers_)
+            {
+                handler->SetSerializer(&serializer);
+            }
 
             // Write Header
             stream.Write(&SAVE_MAGIC, sizeof(SAVE_MAGIC));
@@ -584,6 +623,12 @@ namespace AngelEngine
                 return eastl::unexpected(SerializationError::InvalidData);
             ByteStreamReader stream(data);
             BinarySerializer serializer(engine, &stream, handlers_);
+
+            // Set serializer for all handlers
+            for (auto* handler : handlers_)
+            {
+                handler->SetSerializer(&serializer);
+            }
 
             // Read & Verify Header
             uint32_t magic = 0;

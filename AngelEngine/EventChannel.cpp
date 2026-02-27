@@ -16,11 +16,11 @@ export module AngelEngine.EventChannel;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
-import AngelEngine.FrameAllocator;
 import AngelEngine.NativeViewArray;
 import AngelEngine.StickyContext;
 import AngelEngine.EventsInterfaces;
 import AngelEngine.Utils;
+import AngelEngine.Errors;
 
 namespace AngelEngine
 {

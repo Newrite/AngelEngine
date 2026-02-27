@@ -10,6 +10,8 @@ export module AngelEngine.ReloadManager;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
+import AngelEngine.EventsInterfaces;
 
 namespace AngelEngine
 {

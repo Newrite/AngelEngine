@@ -27,6 +27,7 @@ add_requires("eastl")
 add_requires("mimalloc")
 add_requires("fmt")
 add_requires("nlohmann_json")
+add_requires("gtest", {configs = {use_gtest_main = true}})
 
 if is_mode("release") or is_mode("releasedbg") then
     -- 1. Высший уровень абстракции xmake (включает -O3 / -Ofast)
@@ -191,20 +192,26 @@ target("AngelEngine")
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")
     
-    add_files("AngelEngine/*.cpp|MemoryHooks.cpp", { public = true })
+    add_files("AngelEngine/*.cpp|MemoryHooks.cpp|Infrastructure.cpp", { public = true })
     add_files("AngelEngine/MemoryHooks.cpp")
-    
-    add_files("AngelEngine/Addons/**.cpp", {
+    add_files("AngelEngine/SerializationHandlers.cpp")
+    add_files("AngelEngine/Infrastructure.cpp")
+
+    add_files("AngelEngine/Addons/scripteastlstring/*.cpp", {
         cxflags = "-Wno-unused-but-set-variable"
     })
     add_headerfiles("AngelEngine/**.h", { public = true })
     add_headerfiles("AngelEngine/**.hpp", { public = true,  })
     
     add_includedirs("GitModules/asbind20/include", { public = true })
-    
+
     -- Custom addons for angel script, replace std::string with eastl::string
     add_includedirs("AngelEngine/Addons")
     
+    -- ScriptArray and ScriptDictionary headers
+    add_includedirs("GitModules/angelscript/sdk/add_on/scriptarray")
+    add_includedirs("GitModules/angelscript/sdk/add_on/scriptdictionary")
+
     add_deps("AngelScript")
     add_deps("angelsea")
     
@@ -219,33 +226,35 @@ target("AngelEngine")
     add_defines("_CRT_SECURE_NO_WARNINGS")
 
 -------------------------------------------------------------------------------
--- Target: Test Executable
+-- Target: GTest Executable
 -------------------------------------------------------------------------------
-target("AngelEngineTest")
+target("AngelEngineGTest")
     set_kind("binary")
-    
-    add_files("AngelEngineTest/main.cpp")
-    add_files("AngelEngineTest/TestEventBinding.cpp")
-    add_files("AngelEngineTest/Tests_*.cpp")
-    add_files("AngelEngineTest/E2E_*.cpp")
-    add_headerfiles("AngelEngineTest/*.hpp")
+    set_default(false)  -- Не билдить по умолчанию
+
+    add_files("AngelEngineGTest/*.cpp")
+    add_headerfiles("AngelEngineGTest/*.h")
     add_deps("AngelEngine")
-    
-    add_includedirs("GitModules/asbind20/include")
-    add_includedirs("AngelEngineTest")
-    
+
+    add_packages("gtest", { public = true })
     add_packages("eastl", { public = true })
     add_defines("EASTL_OPENSOURCE")
+
+    add_includedirs("GitModules/asbind20/include")
+    add_includedirs("AngelEngineGTest")
     
+    -- ScriptArray headers for tests
+    add_includedirs("GitModules/angelscript/sdk/add_on/scriptarray")
+
     add_ldflags("-fuse-ld=lld", { tools = "clang-cl" })
     add_cxflags("/utf-8")
-    
+
     add_cxflags(
         "-Wno-unused-command-line-argument",
         { tools = "clang_cl" }
     )
-    
+
     add_defines("_CRT_SECURE_NO_WARNINGS")
-    
+
     set_rundir("$(projectdir)")
     

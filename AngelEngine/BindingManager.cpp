@@ -22,6 +22,7 @@ export module AngelEngine.BindingManager;
 import AngelEngine.Interfaces;
 import AngelEngine.EventsBinding;
 import AngelEngine.Logger;
+import AngelEngine.Errors;
 
 namespace AngelEngine
 {
