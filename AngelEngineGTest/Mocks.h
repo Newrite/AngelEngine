@@ -10,6 +10,7 @@
 import AngelEngine.Interfaces;
 import AngelEngine.Errors;
 import AngelEngine.Types;
+import AngelEngine.EventsInterfaces;
 
 namespace AngelEngine::Test {
 

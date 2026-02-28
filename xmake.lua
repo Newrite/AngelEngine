@@ -5,7 +5,8 @@ set_version("1.0.0")
 set_policy("package.requires_lock", true)
 set_policy("check.auto_ignore_flags", false)
 
-set_policy("build.c++.modules", true)
+-- set_policy("build.c++.modules", true)
+set_policy("build.c++.modules.std", false)
 
 add_rules("mode.debug", "mode.release")
 add_rules("plugin.vsxmake.autoupdate")
@@ -192,10 +193,8 @@ target("AngelEngine")
     add_defines("EASTL_OPENSOURCE")
     add_defines("AS_PROCESS_METADATA=1")
     
-    add_files("AngelEngine/*.cpp|MemoryHooks.cpp|Infrastructure.cpp", { public = true })
+    add_files("AngelEngine/*.mpp", { public = true })
     add_files("AngelEngine/MemoryHooks.cpp")
-    add_files("AngelEngine/SerializationHandlers.cpp")
-    add_files("AngelEngine/Infrastructure.cpp")
 
     add_files("AngelEngine/Addons/scripteastlstring/*.cpp", {
         cxflags = "-Wno-unused-but-set-variable"
@@ -232,8 +231,10 @@ target("AngelEngineGTest")
     set_kind("binary")
     set_default(false)  -- Не билдить по умолчанию
 
+
     add_files("AngelEngineGTest/*.cpp")
     add_headerfiles("AngelEngineGTest/*.h")
+
     add_deps("AngelEngine")
 
     add_packages("gtest", { public = true })
