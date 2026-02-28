@@ -128,7 +128,7 @@ namespace AngelEngine
                 if (r < 0)
                 {
                     Log::Error("[ScriptEngine] __Megamodule__ Compilation FAILED with AS code: {}", r);
-                    engine->DiscardModule(MegaModuleName);
+                    DiscardModule(engine);
 
                     if (!faulty_modules_.empty())
                     {
@@ -147,6 +147,15 @@ namespace AngelEngine
                             "[ScriptEngine] Compilation failed but no faulty module was identified from callbacks.");
                         return eastl::unexpected(ModuleLoaderError::BuildModuleError);
                     }
+                }
+
+                // Initialize global variables
+                asIScriptModule* mod = builder_->GetModule();
+                if (mod)
+                {
+                    r = mod->ResetGlobalVars();
+                    if (r < 0)
+                        Log::Error("[ModuleLoader] Failed to reset global variables: {}", r);
                 }
 
                 compiled = true;
@@ -203,6 +212,11 @@ namespace AngelEngine
             Log::Info("[ScriptEngine] + Successfully loaded __Megamodule__ with {} mods", loaded_modules_.size());
             return {};
         }
+        
+        void DiscardModule(asIScriptEngine* engine) override
+        {
+            engine->DiscardModule(MegaModuleName);
+        }
 
     private:
         // -----------------------------------------------------------------
@@ -217,6 +231,8 @@ namespace AngelEngine
         {
             eastl::string code;
             code += "// AUTO-GENERATED DISPATCHER - DO NOT EDIT\n";
+            
+            // Log::Info("[ModuleLoader] Generating dispatcher for {} channels", descriptors.size());
 
             for (const auto& d : descriptors)
             {

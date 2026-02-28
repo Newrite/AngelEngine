@@ -98,12 +98,12 @@ class ScriptEngineMemoryTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        CleanupTempScriptFiles("LeakTest");
+        CleanupAllTempScriptFiles();
     }
     
     void TearDown() override
     {
-        CleanupTempScriptFiles("LeakTest");
+        CleanupAllTempScriptFiles();
         FrameMemoryPool::Get().Reset();
     }
 };
@@ -301,12 +301,12 @@ class StressMemoryTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        CleanupTempScriptFiles("StressTest");
+        CleanupAllTempScriptFiles();
     }
     
     void TearDown() override
     {
-        CleanupTempScriptFiles("StressTest");
+        CleanupAllTempScriptFiles();
         FrameMemoryPool::Get().Reset();
     }
 };

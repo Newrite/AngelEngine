@@ -36,7 +36,7 @@ protected:
     void SetUp() override
     {
         // Очищаем временные файлы перед тестом
-        CleanupTempScriptFiles("TestMod");
+        CleanupAllTempScriptFiles();
         
         // Создаём engine с полной инфраструктурой
         EngineConfig config;
@@ -55,7 +55,7 @@ protected:
     void TearDown() override
     {
         // Очищаем временные файлы после теста
-        CleanupTempScriptFiles("TestMod");
+        CleanupAllTempScriptFiles();
         
         engine_.reset();
     }

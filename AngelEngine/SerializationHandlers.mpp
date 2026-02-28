@@ -5,7 +5,7 @@ module;
 
 #include <angelscript.h>
 #include <scriptarray.h>
-#include <scriptdictionary.h>
+#include <scriptedictionary/scriptdictionary.h>
 
 #include <cstring>
 
@@ -13,31 +13,44 @@ export module AngelEngine.SerializationHandlers;
 
 import AngelEngine.Interfaces;
 import AngelEngine.Logger;
-
-// Forward declarations from SaveLoadManager
-class ByteStreamWriter;
-class ByteStreamReader;
-
-// AngelScript type IDs
-constexpr int asTYPEID_STRING = 52;
+import AngelEngine.SaveLoadManager;
 
 namespace AngelEngine
 {
-    // Forward declaration - defined in SaveLoadManager module
-    const char* GetPrimitiveTypeName(int typeId);
+    // Helper to determine if a type is stored in-place in global storage.
+    // In AngelScript, reference types (asOBJ_REF) with non-zero size are allocated in-place 
+    // within the module's global memory segment or as members of other objects.
+    bool IsInPlace(asIScriptEngine* engine, int typeId)
+    {
+        if (typeId & asTYPEID_OBJHANDLE) return false;
+        asITypeInfo* ti = engine->GetTypeInfoById(typeId);
+        if (!ti) return false;
+        
+        if (ti->GetSize() > 0) return true;
+        
+        // Special case: "array" is a template type that may be registered with size 0 
+        // but often behaves as an in-place object in this configuration.
+        const char* name = ti->GetName();
+        if (name)
+        {
+            if (strcmp(name, "array") == 0) return true;
+            if (strcmp(name, "dictionary") == 0) return true;
+        }
+        
+        return false;
+    }
+
+    // Helper to get the actual object pointer from a storage address.
+    // Handles the distinction between in-place storage (ptr is the object) 
+    // and pointer storage (ptr is address of the pointer).
+    void* GetObjectPtr(asIScriptEngine* engine, void* ptr, int typeId)
+    {
+        if (IsInPlace(engine, typeId)) return ptr;
+        return *static_cast<void**>(ptr);
+    }
 
     // =======================================================================
     // ArraySerializationHandler
-    // =======================================================================
-    // Handles serialization of array<T> for any element type T.
-    // 
-    // Problem: array<T> is registered as asOBJ_TEMPLATE | asOBJ_REF,
-    // so SaveValueInternal() treats it as SCRIPTOBJECT and iterates
-    // properties — but arrays have ZERO properties, causing data loss.
-    //
-    // Solution: Custom handler that:
-    // 1. Saves: writes element count, then serializes each element recursively
-    // 2. Restores: reads count, resizes array, deserializes each element
     // =======================================================================
     export class ArraySerializationHandler : public ISerializationHandler
     {
@@ -63,8 +76,6 @@ namespace AngelEngine
             if (!type)
                 return false;
 
-            // Check if this is array<T>
-            // Arrays are registered with asOBJ_TEMPLATE | asOBJ_REF
             const char* name = type->GetName();
             return (type->GetFlags() & asOBJ_TEMPLATE) &&
                    (type->GetFlags() & asOBJ_REF) &&
@@ -77,12 +88,13 @@ namespace AngelEngine
             return "array";
         }
 
-        void Save(asIScriptEngine* engine, void* objectPtr, asIBinaryStream* stream) override
+        void Save(asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream) override
         {
-            CScriptArray* arr = static_cast<CScriptArray*>(objectPtr);
+            CScriptArray* arr = static_cast<CScriptArray*>(GetObjectPtr(engine, ptr, typeId));
             if (!arr)
             {
-                Log::Error("[ArraySerializationHandler] Save: null array pointer");
+                asUINT size = 0xFFFFFFFF;
+                stream->Write(&size, sizeof(size));
                 return;
             }
 
@@ -91,52 +103,66 @@ namespace AngelEngine
 
             if (size > 0)
             {
-                // Get element type info for recursive serialization
                 int elemTypeId = arr->GetElementTypeId();
-
                 for (asUINT i = 0; i < size; ++i)
                 {
-                    void* elem = arr->At(i);
-                    // Cast serializer to ISerializationHandler to call SerializeValue
+                    void* elemPtr = arr->At(i);
                     if (serializer_)
                     {
-                        static_cast<ISerializationHandler*>(serializer_)->SerializeValue(elem, elemTypeId, stream, true);
+                        static_cast<ISerializationHandler*>(serializer_)->SerializeValue(elemPtr, elemTypeId, stream, true);
                     }
                 }
             }
         }
 
-        void Restore(asIScriptEngine* engine, void* ptrToHandle, asIBinaryStream* stream) override
+        void Restore(asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream) override
         {
             asUINT size = 0;
             if (stream->Read(&size, sizeof(size)) < 0)
+                return;
+
+            bool inPlace = IsInPlace(engine, typeId);
+            CScriptArray* arr = nullptr;
+            void** hptr = nullptr;
+
+            if (inPlace)
             {
-                Log::Error("[ArraySerializationHandler] Restore: failed to read size");
+                arr = static_cast<CScriptArray*>(ptr);
+            }
+            else
+            {
+                hptr = static_cast<void**>(ptr);
+                arr = static_cast<CScriptArray*>(*hptr);
+            }
+
+            if (size == 0xFFFFFFFF)
+            {
+                if (!inPlace && hptr && *hptr)
+                {
+                    static_cast<CScriptArray*>(*hptr)->Release();
+                    *hptr = nullptr;
+                }
                 return;
             }
 
-            // ptrToHandle is a handle (CScriptArray**), dereference to get actual array
-            CScriptArray*& arrRef = *static_cast<CScriptArray**>(ptrToHandle);
-
-            if (!arrRef)
+            if (!arr)
             {
-                Log::Error("[ArraySerializationHandler] Restore: null array handle - arrays must be pre-declared");
-                return;
+                asITypeInfo* ti = engine->GetTypeInfoById(typeId);
+                arr = CScriptArray::Create(ti);
+                if (!inPlace && hptr) *hptr = arr;
             }
 
-            // Resize existing array
-            arrRef->Resize(size);
+            arr->Resize(size);
 
             if (size > 0)
             {
-                int elemTypeId = arrRef->GetElementTypeId();
-
+                int elemTypeId = arr->GetElementTypeId();
                 for (asUINT i = 0; i < size; ++i)
                 {
-                    void* elem = arrRef->At(i);
+                    void* elemPtr = arr->At(i);
                     if (serializer_)
                     {
-                        static_cast<ISerializationHandler*>(serializer_)->SerializeValue(elem, elemTypeId, stream, false);
+                        static_cast<ISerializationHandler*>(serializer_)->SerializeValue(elemPtr, elemTypeId, stream, false);
                     }
                 }
             }
@@ -144,8 +170,6 @@ namespace AngelEngine
 
         bool SerializeValue(void* ptr, int typeId, asIBinaryStream* stream, bool isSave) override
         {
-            // This is a stub - actual implementation is in BinarySerializer
-            // This method is here to satisfy the interface but should not be called directly
             return false;
         }
 
@@ -156,15 +180,6 @@ namespace AngelEngine
 
     // =======================================================================
     // DictionarySerializationHandler
-    // =======================================================================
-    // Handles serialization of dictionary (key: string -> value: any).
-    //
-    // Problem: Same as array — dictionary has no script properties,
-    // so default serialization saves nothing.
-    //
-    // Solution: Custom handler that:
-    // 1. Saves: writes key count, then for each entry: key string + value with type
-    // 2. Restores: reads count, then reconstructs each key-value pair
     // =======================================================================
     export class DictionarySerializationHandler : public ISerializationHandler
     {
@@ -190,10 +205,8 @@ namespace AngelEngine
             if (!type)
                 return false;
 
-            // Dictionary is registered as asOBJ_TEMPLATE | asOBJ_REF
             const char* name = type->GetName();
-            return (type->GetFlags() & asOBJ_TEMPLATE) &&
-                   (type->GetFlags() & asOBJ_REF) &&
+            return (type->GetFlags() & asOBJ_REF) &&
                    name != nullptr &&
                    eastl::string(name) == "dictionary";
         }
@@ -203,20 +216,19 @@ namespace AngelEngine
             return "dictionary";
         }
 
-        void Save(asIScriptEngine* engine, void* objectPtr, asIBinaryStream* stream) override
+        void Save(asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream) override
         {
-            CScriptDictionary* dict = static_cast<CScriptDictionary*>(objectPtr);
+            CScriptDictionary* dict = static_cast<CScriptDictionary*>(GetObjectPtr(engine, ptr, typeId));
             if (!dict)
             {
-                Log::Error("[DictionarySerializationHandler] Save: null dictionary pointer");
+                asUINT keyCount = 0xFFFFFFFF;
+                stream->Write(&keyCount, sizeof(keyCount));
                 return;
             }
 
-            // Get all keys - GetKeys() returns a CScriptArray*
             CScriptArray* keysArray = dict->GetKeys();
             if (!keysArray)
             {
-                // Empty dictionary
                 asUINT keyCount = 0;
                 stream->Write(&keyCount, sizeof(keyCount));
                 return;
@@ -230,186 +242,107 @@ namespace AngelEngine
                 const dictKey_t* keyPtr = static_cast<const dictKey_t*>(keysArray->At(i));
                 const dictKey_t& key = *keyPtr;
 
-                // Write key string
                 uint32_t keyLen = static_cast<uint32_t>(key.length());
                 stream->Write(&keyLen, sizeof(keyLen));
                 if (keyLen > 0)
-                {
                     stream->Write(key.c_str(), keyLen);
-                }
 
-                // Get value and its type
                 int valueTypeId = dict->GetTypeId(key.c_str());
-                if (valueTypeId >= 0)
+                if (serializer_)
                 {
-                    // Write type info and value using serializer
-                    if (serializer_)
-                    {
-                        // First write type marker
-                        bool isHandle = (valueTypeId & asTYPEID_OBJHANDLE) != 0;
-                        stream->Write(&isHandle, sizeof(isHandle));
+                    auto* s = static_cast<BinarySerializer*>(serializer_);
+                    if (!s->WriteStableType(valueTypeId))
+                        continue;
 
-                        // Write type declaration
-                        asITypeInfo* typeInfo = engine->GetTypeInfoById(valueTypeId);
-                        if (typeInfo)
-                        {
-                            eastl::string fullName;
-                            const char* ns = typeInfo->GetNamespace();
-                            if (ns && ns[0] != '\0')
-                            {
-                                fullName = eastl::string(ns) + "::";
-                            }
-                            fullName += typeInfo->GetName();
-
-                            uint32_t len = static_cast<uint32_t>(fullName.length());
-                            stream->Write(&len, sizeof(len));
-                            if (len > 0)
-                                stream->Write(fullName.c_str(), len);
-                        }
-                        else
-                        {
-                            // Primitive type
-                            const char* primName = GetPrimitiveTypeName(valueTypeId);
-                            if (primName)
-                            {
-                                uint32_t len = static_cast<uint32_t>(std::strlen(primName));
-                                stream->Write(&len, sizeof(len));
-                                if (len > 0)
-                                    stream->Write(primName, len);
-                            }
-                        }
-
-                        // Get value using operator[]
-                        const CScriptDictValue* dictValue = (*dict)[key.c_str()];
-                        if (dictValue)
-                        {
-                            // Write value using serializer
-                            static_cast<ISerializationHandler*>(serializer_)->SerializeValue(
-                                const_cast<void*>(dictValue->GetAddressOfValue()), valueTypeId, stream, true);
-                        }
-                    }
-                }
-                else
-                {
-                    // Null entry
-                    bool isHandle = false;
-                    stream->Write(&isHandle, sizeof(isHandle));
-                    uint32_t nullLen = 4;
-                    stream->Write(&nullLen, sizeof(nullLen));
-                    stream->Write("void", 4);
-                    uint32_t valSize = 0;
-                    stream->Write(&valSize, sizeof(valSize));
+                    const CScriptDictValue* dictValue = (*dict)[key.c_str()];
+                    void* valPtr = const_cast<void*>(dictValue->GetAddressOfValue());
+                    
+                    s->SerializeValue(valPtr, valueTypeId, stream, true);
                 }
             }
+            keysArray->Release();
         }
 
-        void Restore(asIScriptEngine* engine, void* ptrToHandle, asIBinaryStream* stream) override
+        void Restore(asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream) override
         {
             asUINT keyCount = 0;
             if (stream->Read(&keyCount, sizeof(keyCount)) < 0)
+                return;
+
+            bool inPlace = IsInPlace(engine, typeId);
+            CScriptDictionary* dict = nullptr;
+            void** hptr = nullptr;
+
+            if (inPlace)
             {
-                Log::Error("[DictionarySerializationHandler] Restore: failed to read key count");
+                dict = static_cast<CScriptDictionary*>(ptr);
+            }
+            else
+            {
+                hptr = static_cast<void**>(ptr);
+                dict = static_cast<CScriptDictionary*>(*hptr);
+            }
+
+            if (keyCount == 0xFFFFFFFF)
+            {
+                if (!inPlace && hptr && *hptr)
+                {
+                    static_cast<CScriptDictionary*>(*hptr)->Release();
+                    *hptr = nullptr;
+                }
                 return;
             }
 
-            CScriptDictionary*& dictRef = *static_cast<CScriptDictionary**>(ptrToHandle);
-
-            if (!dictRef)
+            if (!dict)
             {
-                Log::Error("[DictionarySerializationHandler] Restore: null dictionary handle");
-                return;
+                dict = CScriptDictionary::Create(engine);
+                if (!inPlace && hptr) *hptr = dict;
             }
 
-            // Clear existing dictionary
-            dictRef->DeleteAll();
+            dict->DeleteAll();
+
+            int stringTypeId = engine->GetTypeIdByDecl("string");
 
             for (asUINT i = 0; i < keyCount; ++i)
             {
-                // Read key
                 uint32_t keyLen = 0;
                 if (stream->Read(&keyLen, sizeof(keyLen)) < 0)
-                {
-                    Log::Error("[DictionarySerializationHandler] Restore: failed to read key length");
                     return;
-                }
 
                 dictKey_t key;
                 key.resize(keyLen);
                 if (keyLen > 0)
+                    stream->Read(key.data(), keyLen);
+
+                if (serializer_)
                 {
-                    if (stream->Read(key.data(), keyLen) < 0)
-                    {
-                        Log::Error("[DictionarySerializationHandler] Restore: failed to read key");
+                    auto* s = static_cast<BinarySerializer*>(serializer_);
+                    auto typeRes = s->ReadStableType();
+                    if (!typeRes)
                         return;
-                    }
-                }
+                    int valueTypeId = typeRes.value();
 
-                // Read type info
-                bool isHandle = false;
-                if (stream->Read(&isHandle, sizeof(isHandle)) < 0)
-                    return;
-
-                uint32_t typeNameLen = 0;
-                if (stream->Read(&typeNameLen, sizeof(typeNameLen)) < 0)
-                    return;
-
-                eastl::string typeName;
-                typeName.resize(typeNameLen);
-                if (typeNameLen > 0)
-                {
-                    if (stream->Read(typeName.data(), typeNameLen) < 0)
-                        return;
-                }
-
-                int valueTypeId = engine->GetTypeIdByDecl(typeName.c_str());
-                if (valueTypeId < 0)
-                {
-                    // Try primitive types
-                    if (typeName == "int") valueTypeId = asTYPEID_INT32;
-                    else if (typeName == "float") valueTypeId = asTYPEID_FLOAT;
-                    else if (typeName == "double") valueTypeId = asTYPEID_DOUBLE;
-                    else if (typeName == "bool") valueTypeId = asTYPEID_BOOL;
-                    else if (typeName == "string") valueTypeId = asTYPEID_STRING;
-                }
-
-                if (isHandle && valueTypeId >= 0)
-                    valueTypeId |= asTYPEID_OBJHANDLE;
-
-                // Read value data
-                uint32_t valSize = 0;
-                if (stream->Read(&valSize, sizeof(valSize)) < 0)
-                    return;
-
-                if (valSize > 0 && serializer_)
-                {
-                    // For handle types, create object first
-                    if (valueTypeId & asTYPEID_OBJHANDLE)
+                    if (valueTypeId == stringTypeId)
                     {
-                        asITypeInfo* typeInfo = engine->GetTypeInfoById(valueTypeId & ~asTYPEID_OBJHANDLE);
-                        if (typeInfo)
+                        eastl::string str;
+                        s->SerializeValue(&str, valueTypeId, stream, false);
+                        dict->Set(key.c_str(), &str, valueTypeId);
+                    }
+                    else if (engine->GetSizeOfPrimitiveType(valueTypeId) > 0)
+                    {
+                        asINT64 dummy = 0;
+                        s->SerializeValue(&dummy, valueTypeId, stream, false);
+                        dict->Set(key.c_str(), &dummy, valueTypeId);
+                    }
+                    else
+                    {
+                        void* dummy = nullptr;
+                        s->SerializeValue(&dummy, valueTypeId, stream, false);
+                        dict->Set(key.c_str(), &dummy, valueTypeId);
+                        if (dummy)
                         {
-                            void* obj = engine->CreateScriptObject(typeInfo);
-                            dictRef->Set(key.c_str(), &obj, valueTypeId);
-                            engine->ReleaseScriptObject(obj, typeInfo);
+                            engine->ReleaseScriptObject(dummy, engine->GetTypeInfoById(valueTypeId));
                         }
-                    }
-                    else if (valueTypeId & asTYPEID_SCRIPTOBJECT)
-                    {
-                        asITypeInfo* typeInfo = engine->GetTypeInfoById(valueTypeId);
-                        if (typeInfo)
-                        {
-                            void* obj = engine->CreateScriptObject(typeInfo);
-                            dictRef->Set(key.c_str(), obj, valueTypeId);
-                            engine->ReleaseScriptObject(obj, typeInfo);
-                        }
-                    }
-
-                    // Get the dict value entry and deserialize into it
-                    CScriptDictValue* dictValue = (*dictRef)[key.c_str()];
-                    if (dictValue)
-                    {
-                        static_cast<ISerializationHandler*>(serializer_)->SerializeValue(
-                            const_cast<void*>(dictValue->GetAddressOfValue()), valueTypeId, stream, false);
                     }
                 }
             }
@@ -417,7 +350,6 @@ namespace AngelEngine
 
         bool SerializeValue(void* ptr, int typeId, asIBinaryStream* stream, bool isSave) override
         {
-            // Stub implementation
             return false;
         }
 

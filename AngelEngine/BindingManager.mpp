@@ -38,7 +38,7 @@ namespace AngelEngine
             // Standard add-ons usually don't fail unless OOM or bad config.
             RegisterEASTLString(engine);
             RegisterScriptArray(engine, true);
-            RegisterScriptDictionary(engine);
+            RegisterScriptDictionarEASTLString(engine);
             RegisterScriptMath(engine);
             RegisterScriptFile(engine);
             RegisterScriptAny(engine);

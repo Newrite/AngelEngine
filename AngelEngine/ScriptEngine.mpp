@@ -442,7 +442,6 @@ namespace AngelEngine
                     Log::Info("[ScriptEngine] Wired dispatcher: {} to channel {}", funcName.c_str(),
                               d.eventName.c_str());
                     channel->SetDispatcherFn(engine_.get(), executionManager_.get(), fn);
-                    channel->WarmupJIT();
                 }
                 else
                 {

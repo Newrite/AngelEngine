@@ -1250,7 +1250,7 @@ const void* CScriptDictionary::CIterator::GetAddressOfValue() const
 //--------------------------------------------------------------------------
 // Register the type
 
-void RegisterScriptDictionary(asIScriptEngine *engine)
+void RegisterScriptDictionarEASTLString(asIScriptEngine *engine)
 {
 	if( strstr(asGetLibraryOptions(), "AS_MAX_PORTABILITY") )
 		RegisterScriptDictionary_Generic(engine);

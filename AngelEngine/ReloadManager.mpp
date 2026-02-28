@@ -25,8 +25,10 @@ namespace AngelEngine
             Log::Info("[ScriptEngine] Starting Reload...");
 
             eventManager->ClearAll();
-
-            int r = engine->GarbageCollect();
+            
+            moduleLoader->DiscardModule(engine);
+            
+            int r = engine->GarbageCollect(asGC_FULL_CYCLE);
             if (r < 0)
                 Log::Error("[ScriptEngine] GarbageCollect failed with code: {} while reload scripts", r);
 

@@ -81,6 +81,20 @@ template<typename T, typename E>
 }
 
 /**
+ * @brief Helper для очистки всех временных скрипт-файлов
+ */
+inline void CleanupAllTempScriptFiles()
+{
+    namespace fs = std::filesystem;
+    
+    fs::path basePath = fs::current_path() / "angelscripts" / "mods";
+    if (fs::exists(basePath))
+    {
+        fs::remove_all(basePath);
+    }
+}
+
+/**
  * @brief Helper для очистки временных скрипт-файлов
  * 
  * @param modName Имя модуля для очистки

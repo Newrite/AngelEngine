@@ -98,6 +98,13 @@ public:
     );
     
     MOCK_METHOD(
+        (void),
+        DiscardModule,
+        (asIScriptEngine* engine),
+        (override)
+    );
+    
+    MOCK_METHOD(
         void,
         RecordCompilationError,
         (const eastl::string& sectionName),
@@ -235,6 +242,111 @@ public:
         void,
         DispatchBuiltinEvents,
         (asIScriptContext* ctx, float deltaTime),
+        (override)
+    );
+};
+
+/**
+ * @brief Mock для IBindingManager
+ */
+class MockBindingManager : public IBindingManager
+{
+public:
+    MOCK_METHOD(
+        (eastl::expected<void, BindingError>),
+        RegisterStandardAddons,
+        (asIScriptEngine* engine),
+        (override)
+    );
+
+    MOCK_METHOD(
+        (eastl::expected<void, BindingError>),
+        BindAll,
+        (asIScriptEngine* engine),
+        (override)
+    );
+
+    MOCK_METHOD(
+        (eastl::expected<void, BindingError>),
+        Bind,
+        (asIScriptEngine* engine, IScriptBinding* binding),
+        (override)
+    );
+
+    MOCK_METHOD(
+        void,
+        AddBinding,
+        (IScriptBinding* binding),
+        (override)
+    );
+};
+
+/**
+ * @brief Mock для IScriptWatcher
+ */
+class MockScriptWatcher : public IScriptWatcher
+{
+public:
+    MOCK_METHOD(
+        bool,
+        CheckAndResetReloadFlag,
+        (),
+        (override)
+    );
+};
+
+/**
+ * @brief Mock для ISerializationHandler
+ */
+class MockSerializationHandler : public ISerializationHandler
+{
+public:
+    MOCK_METHOD(
+        bool,
+        CanHandle,
+        (int typeId),
+        (const, override)
+    );
+
+    MOCK_METHOD(
+        const char*,
+        GetTypeName,
+        (),
+        (const, override)
+    );
+
+    MOCK_METHOD(
+        void,
+        SetSerializer,
+        (void* serializer),
+        (override)
+    );
+
+    MOCK_METHOD(
+        void,
+        SetEngine,
+        (asIScriptEngine* engine),
+        (override)
+    );
+
+    MOCK_METHOD(
+        void,
+        Save,
+        (asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream),
+        (override)
+    );
+
+    MOCK_METHOD(
+        void,
+        Restore,
+        (asIScriptEngine* engine, void* ptr, int typeId, asIBinaryStream* stream),
+        (override)
+    );
+
+    MOCK_METHOD(
+        bool,
+        SerializeValue,
+        (void* ptr, int typeId, asIBinaryStream* stream, bool isSave),
         (override)
     );
 };

@@ -49,6 +49,7 @@ namespace AngelEngine
         virtual bool Empty() const = 0;
         virtual const eastl::vector<eastl::string>&
         GetSaveableVars(const eastl::string& modName) const = 0;
+        virtual void DiscardModule(asIScriptEngine* engine) = 0;
         virtual void RecordCompilationError(const eastl::string& sectionName) = 0;
     };
 
@@ -137,13 +138,13 @@ namespace AngelEngine
         virtual bool CanHandle(int typeId) const = 0;
         // Returns a stable string identifier for this handler's type, written into
         // the save format. Must remain constant across versions — changing it will
-        // break existing saves. Example: "ActorHandle", "QuestData", etc.
+        // break existing saves. Example: \"ActorHandle\", \"QuestData\", etc.
         virtual const char* GetTypeName() const = 0;
         virtual void SetSerializer(void* serializer) = 0;
         virtual void SetEngine(asIScriptEngine* engine) = 0;
-        virtual void Save(asIScriptEngine* engine, void* objectPtr,
+        virtual void Save(asIScriptEngine* engine, void* ptr, int typeId,
                           asIBinaryStream* stream) = 0;
-        virtual void Restore(asIScriptEngine* engine, void* ptrToHandle,
+        virtual void Restore(asIScriptEngine* engine, void* ptr, int typeId,
                              asIBinaryStream* stream) = 0;
         // Helper methods for recursive serialization - implemented by
         // BinarySerializer

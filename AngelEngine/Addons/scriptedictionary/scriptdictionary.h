@@ -251,7 +251,7 @@ protected:
 
 // This function will determine the configuration of the engine
 // and use one of the two functions below to register the dictionary object
-void RegisterScriptDictionary(asIScriptEngine *engine);
+void RegisterScriptDictionarEASTLString(asIScriptEngine *engine);
 
 // Call this function to register the math functions
 // using native calling conventions

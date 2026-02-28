@@ -117,16 +117,16 @@ target("AngelScript")
     add_includedirs(as_root .. "/include", { public = true })
     
     -- String
-    add_files(as_addon .. "/scriptstdstring/*.cpp")
-    add_includedirs(as_addon .. "/scriptstdstring", { public = true })
+    -- add_files(as_addon .. "/scriptstdstring/*.cpp")
+    -- add_includedirs(as_addon .. "/scriptstdstring", { public = true })
     
     -- Array
     add_files(as_addon .. "/scriptarray/*.cpp")
     add_includedirs(as_addon .. "/scriptarray", { public = true })
     
     -- Dictionary
-    add_files(as_addon .. "/scriptdictionary/*.cpp")
-    add_includedirs(as_addon .. "/scriptdictionary", { public = true })
+    -- add_files(as_addon .. "/scriptdictionary/*.cpp")
+    -- add_includedirs(as_addon .. "/scriptdictionary", { public = true })
     
     -- Math
     add_files(as_addon .. "/scriptmath/*.cpp")
@@ -173,7 +173,9 @@ target("AngelScript")
     add_includedirs(as_addon .. "/debugger", { public = true })
     
     -- AS_NO_EXCEPTIONS disable exception inside AS
-    add_defines("AS_NO_EXCEPTIONS")
+    add_defines("AS_NO_EXCEPTIONS", { public = true })
+
+    add_defines("AS_PROCESS_METADATA=1")
     
     add_cxflags(
         "-Wno-deprecated-declarations",
@@ -195,21 +197,15 @@ target("AngelEngine")
     
     add_files("AngelEngine/*.mpp", { public = true })
     add_files("AngelEngine/MemoryHooks.cpp")
-
-    add_files("AngelEngine/Addons/scripteastlstring/*.cpp", {
-        cxflags = "-Wno-unused-but-set-variable"
-    })
-    add_headerfiles("AngelEngine/**.h", { public = true })
-    add_headerfiles("AngelEngine/**.hpp", { public = true,  })
     
     add_includedirs("GitModules/asbind20/include", { public = true })
 
     -- Custom addons for angel script, replace std::string with eastl::string
-    add_includedirs("AngelEngine/Addons")
-    
-    -- ScriptArray and ScriptDictionary headers
-    add_includedirs("GitModules/angelscript/sdk/add_on/scriptarray")
-    add_includedirs("GitModules/angelscript/sdk/add_on/scriptdictionary")
+    add_headerfiles("AngelEngine/Addons/**.h", "AngelEngine/Addons/**.h")
+    add_files("AngelEngine/Addons/**.cpp", {
+        cxflags = "-Wno-unused-but-set-variable"
+    })
+    add_includedirs("AngelEngine/Addons", { public = true })
 
     add_deps("AngelScript")
     add_deps("angelsea")
@@ -240,6 +236,7 @@ target("AngelEngineGTest")
     add_packages("gtest", { public = true })
     add_packages("eastl", { public = true })
     add_defines("EASTL_OPENSOURCE")
+    add_defines("AS_PROCESS_METADATA=1")
 
     add_includedirs("GitModules/asbind20/include")
     add_includedirs("AngelEngineGTest")
